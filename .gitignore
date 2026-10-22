@@ -1,0 +1,15 @@
+.env
+.venv/
+
+# Arquivos gerados pelo Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Caches das ferramentas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Dados gerados localmente
+storage/
