@@ -40,3 +40,5 @@ markers = ["integration: testes que chamam APIs externas (custam dinheiro)"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
