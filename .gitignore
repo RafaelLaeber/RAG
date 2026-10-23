@@ -14,4 +14,7 @@ __pycache__/
 # Dados gerados localmente
 storage/
 
+#documentos
+data/
+
 CLAUDE.md
