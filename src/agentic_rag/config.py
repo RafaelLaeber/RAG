@@ -1,8 +1,9 @@
 """Configuração da aplicação, lida de variáveis de ambiente e do arquivo .env"""
 
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,11 @@ class Settings(BaseSettings):
 
     # Vector Store
     astra_db_collection: str = "documents"
+
+    # Ingestão
+    data_dir: Path = Path("data/raw")
+    chunk_size: int = Field(default=1000, gt=0)
+    chunk_overlap: int = Field(default=150, ge=0)
 
 
 @lru_cache  # Devolve o mesmo objeto sem precisar recriar
