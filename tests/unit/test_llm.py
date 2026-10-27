@@ -13,6 +13,7 @@ def patched_settings(monkeypatch: pytest.MonkeyPatch, test_settings: Settings) -
     monkeypatch.setattr(llm, "get_settings", lambda: test_settings)
     return test_settings
 
+
 def test_get_chat_model_uses_settings(patched_settings: Settings) -> None:
     model = llm.get_chat_model()
 
