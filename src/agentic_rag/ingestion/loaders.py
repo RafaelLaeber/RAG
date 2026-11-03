@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+import yaml
 from langchain_core.documents import Document
 from pypdf import PdfReader
 
@@ -12,10 +13,26 @@ TEXT_EXTENSIONS = {".md", ".txt"}
 PDF_EXTENSIONS = {".pdf"}
 
 
+def _split_front_matter(text: str) -> tuple[dict[str, str], str]:
+    """Separa o front matter YAML (bloco entre linhas '---' no topo) do corpo do texto."""
+    if not text.startswith("---\n"):
+        return {}, text
+
+    header, separator, body = text[4:].partition("\n---\n")
+    if not separator:
+        return {}, text
+
+    data = yaml.safe_load(header) or {}
+    if not isinstance(data, dict):
+        raise ValueError("O front matter deve ser um mapeamento chave: valor")
+    return {str(key): str(value) for key, value in data.items()}, body
+
+
 def _load_text(path: Path) -> list[Document]:
-    """Carrega um arquivo de texto como um único documento."""
+    """Carrega um arquivo de texto como um único documento, lendo o front matter se houver."""
     content = path.read_text(encoding="utf-8")
-    return [Document(page_content=content, metadata={"source": path.name})]
+    front_matter, body = _split_front_matter(content)
+    return [Document(page_content=body, metadata={**front_matter, "source": path.name})]
 
 
 def _load_pdf(path: Path) -> list[Document]:

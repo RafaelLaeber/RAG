@@ -1,0 +1,81 @@
+---
+doc_type: faq
+status: vigente
+---
+
+
+NIMBUS – PERGUNTAS FREQUENTES (FAQ)
+Plataforma de agendamento e gestão para clínicas veterinárias
+Órbita Tecnologia – atualizado em agosto de 2026
+
+(Documento fictício, criado para testes de RAG.)
+
+
+PLANOS E PREÇOS
+
+O Nimbus tem três planos:
+
+- Nimbus Essencial: R$ 189,00 por mês. Até 2 veterinários, agenda online, lembretes por e-mail e prontuário básico.
+- Nimbus Pro: R$ 429,00 por mês. Até 10 veterinários, tudo do Essencial mais lembretes por WhatsApp, controle de estoque e emissão de nota fiscal.
+- Nimbus Rede: preço sob consulta. Veterinários ilimitados, múltiplas unidades, relatórios consolidados e gerente de conta dedicado.
+
+Todos os planos têm 14 dias de teste grátis, sem precisar cadastrar cartão de crédito.
+
+No pagamento anual, há desconto de 15% em qualquer plano.
+
+
+O NIMBUS FUNCIONA SEM INTERNET?
+
+Não. O Nimbus é 100% online e precisa de conexão com a internet. Não existe modo offline nem versão instalada localmente. Se a internet da clínica cair, é possível continuar usando pelo aplicativo de celular com dados móveis.
+
+
+O NIMBUS TEM APLICATIVO DE CELULAR?
+
+Sim. Existe o aplicativo "Nimbus Vet" para Android e iOS, voltado para os veterinários, e o aplicativo "Nimbus Tutor", para os donos dos animais acompanharem vacinas e agendarem consultas. O Nimbus Tutor é gratuito para os tutores.
+
+
+O NIMBUS SUPORTA TELEMEDICINA?
+
+Sim, a partir da versão 5.0 (lançada em junho de 2026), o Nimbus Pro e o Nimbus Rede incluem teleconsulta por vídeo, com até 40 minutos por chamada. O plano Essencial não tem telemedicina.
+
+
+O NIMBUS SUPORTA ATENDIMENTO DE ANIMAIS SILVESTRES OU EXÓTICOS?
+
+Não. O prontuário do Nimbus foi feito para cães, gatos, aves domésticas, coelhos e roedores de estimação. Animais silvestres e exóticos (répteis, primatas, animais de zoológico) não são suportados, porque exigem campos de prontuário e registros junto ao IBAMA que o sistema não tem.
+
+
+O NIMBUS INTEGRA COM LABORATÓRIOS?
+
+Sim. O Nimbus integra com os laboratórios VetLab, Diagnóstica Animal e PetExames. Os resultados de exames chegam direto no prontuário do animal. Integrações com outros laboratórios podem ser solicitadas no plano Rede.
+
+
+O NIMBUS EMITE NOTA FISCAL?
+
+Sim, nos planos Pro e Rede. A emissão de NFS-e está disponível para todas as capitais brasileiras e para mais de 900 municípios. O plano Essencial não emite nota fiscal.
+
+
+COMO FUNCIONAM OS LEMBRETES PARA OS TUTORES?
+
+O Nimbus envia lembretes automáticos de consulta 24 horas antes do horário marcado, e lembretes de vacina 7 dias antes do vencimento. No plano Essencial, os lembretes são só por e-mail. Nos planos Pro e Rede, também por WhatsApp. Lembretes por SMS não são oferecidos.
+
+
+COMO É FEITO O BACKUP DOS DADOS?
+
+Os dados ficam em servidores no Brasil (região São Paulo) e o backup é feito a cada 6 horas, com retenção de 90 dias. A clínica pode exportar todos os seus dados em formato CSV a qualquer momento, inclusive após cancelar a assinatura, por até 60 dias.
+
+
+O NIMBUS ESTÁ ADEQUADO À LGPD?
+
+Sim. A Órbita é a operadora dos dados e a clínica é a controladora. O Nimbus tem registro de consentimento dos tutores, permite atender pedidos de exclusão de dados e mantém log de acesso a prontuários por 5 anos.
+
+
+COMO CANCELAR A ASSINATURA?
+
+O cancelamento é feito pelo próprio sistema, em Configurações > Assinatura > Cancelar. Não há multa de cancelamento nos planos mensais. Nos planos anuais, o valor dos meses restantes não é devolvido, mas o acesso continua até o fim do período pago.
+
+
+QUAL O HORÁRIO DO SUPORTE?
+
+- Essencial: chat e e-mail, de segunda a sexta, das 8h às 18h.
+- Pro: chat, e-mail e telefone, de segunda a sábado, das 7h às 21h.
+- Rede: suporte 24 horas por dia, 7 dias por semana, com tempo de primeira resposta de até 30 minutos.
