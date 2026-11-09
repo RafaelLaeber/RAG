@@ -23,10 +23,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0",
     "ruff>=0.17",
     "mypy>=2.4",
-    "ipykernel>=7.4",
     "types-PyYAML>=6.0",
 ]
 
@@ -40,10 +38,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = ["integration: testes que chamam APIs externas (custam dinheiro)"]
 
 [tool.mypy]
 python_version = "3.12"
