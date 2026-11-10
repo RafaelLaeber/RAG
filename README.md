@@ -34,8 +34,6 @@ Todas as execuções são registradas no LangSmith (tracing).
 
 **Consulta (online):** pergunta → agente → tools → resposta.
 
-Decisões técnicas e justificativas: [docs/decisoes_tecnicas.md](docs/decisoes_tecnicas.md).
-
 ## Estrutura
 
 ```
@@ -54,7 +52,6 @@ src/agentic_rag/
 │   └── agent.py           # get_agent()
 └── cli.py                 # chat no terminal
 data/raw/                  # documentos de entrada
-docs/                      # decisões técnicas
 ```
 
 ## Requisitos
