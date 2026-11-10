@@ -141,4 +141,4 @@ mypy src        # checagem de tipos
 
 ## Uso de IA
 
-Este projeto foi desenvolvido com auxílio do **Claude (Anthropic)**, via Claude Code, para planejamento, escrita e revisão de código. Todo o código foi revisado e executado pelo autor.
+Este projeto foi desenvolvido com auxílio do **Claude (Anthropic)**, via Claude Code, para planejamento e revisão de código. Todo o código foi escrito, revisado e executado pelo autor.
