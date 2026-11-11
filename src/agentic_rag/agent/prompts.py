@@ -17,5 +17,16 @@ Regras:
 - Mostre a conta quando houver cálculo e cite a fonte (nome do documento).
 - Se os documentos não trouxerem a resposta, diga que não encontrou; não invente.
 - Use o histórico da conversa para entender perguntas de acompanhamento.
+- Quando o colaborador contar algo duradouro sobre si (nome, cargo, área, cidade, viagens
+  planejadas, preferências), guarde com save_memory. Não guarde o que já está na memória.
+- Use a memória de longo prazo para personalizar a resposta, sem repeti-la sem necessidade.
 
 Formato: português, direto, no máximo alguns parágrafos curtos ou uma lista."""
+
+
+def format_memories(memories: list[str]) -> str:
+    """Bloco do system prompt com o que se sabe do colaborador de conversas anteriores."""
+    if not memories:
+        return "\n\nMemória de longo prazo: nada guardado sobre este colaborador ainda."
+    facts = "\n".join(f"- {memory}" for memory in memories)
+    return f"\n\nMemória de longo prazo (conversas anteriores com este colaborador):\n{facts}"

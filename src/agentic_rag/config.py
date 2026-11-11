@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     exchange_api_url: str = "https://economia.awesomeapi.com.br/json/last"
     exchange_timeout: float = Field(default=10.0, gt=0)
 
+    # Memória de longo prazo (SQLite local)
+    memory_db_path: Path = Path("storage/memory.sqlite")
+    memory_max_items: int = Field(default=50, gt=0)
+    user_id: str = "colaborador"
+
     # LangSmith (opcional: sem chave, o tracing fica desligado)
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "orbita-agent"
