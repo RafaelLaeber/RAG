@@ -21,8 +21,20 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING)
     tracing = setup_langsmith()
     agent = get_agent()
-    config: RunnableConfig = {"configurable": {"thread_id": str(uuid.uuid4())}}
-    context = UserContext(user_id=get_settings().user_id)
+    settings = get_settings()
+    thread_id = str(uuid.uuid4())
+    context = UserContext(user_id=settings.user_id)
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        # LangSmith: thread_id na metadata agrupa os turnos na aba Threads;
+        # user_id, modelo e tags permitem filtrar os traces no painel
+        "metadata": {
+            "thread_id": thread_id,
+            "user_id": context.user_id,
+            "llm_model": settings.llm_model,
+        },
+        "tags": ["cli", "memoria-sqlite"],
+    }
 
     print("Assistente Órbita (digite 'sair' para encerrar)")
     print(f"LangSmith: {'ligado' if tracing else 'desligado'} | usuário: {context.user_id}\n")
