@@ -4,10 +4,23 @@ import logging
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langsmith import traceable
+
+from agentic_rag.ingestion.tracing import summarize_documents
 
 logger = logging.getLogger(__name__)
 
 
+@traceable(
+    run_type="chain",
+    name="split_documents",
+    process_inputs=lambda inputs: {
+        "documents": summarize_documents(inputs["documents"]),
+        "chunk_size": inputs["chunk_size"],
+        "chunk_overlap": inputs["chunk_overlap"],
+    },
+    process_outputs=summarize_documents,
+)
 def split_documents(
     documents: list[Document], chunk_size: int, chunk_overlap: int
 ) -> list[Document]:

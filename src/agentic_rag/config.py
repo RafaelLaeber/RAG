@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     memory_max_items: int = Field(default=50, gt=0)
     user_id: str = "colaborador"
 
+    # Histórico de conversas (SQLite local)
+    conversations_db_path: Path = Path("storage/conversations.sqlite")
+    conversations_max_items: int = Field(default=30, gt=0)
+
     # LangSmith (opcional: sem chave, o tracing fica desligado)
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "orbita-agent"

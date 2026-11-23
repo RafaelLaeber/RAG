@@ -103,6 +103,12 @@ Rodar de novo não duplica os chunks: o ID de cada um é o hash do conteúdo.
 python -m agentic_rag.cli
 ```
 
+Ou, pela interface web (Streamlit, tema escuro, com botão para gerar os embeddings):
+
+```powershell
+streamlit run src/agentic_rag/app.py
+```
+
 Exemplo de conversa:
 
 ```

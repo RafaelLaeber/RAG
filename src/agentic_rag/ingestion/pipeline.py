@@ -4,10 +4,12 @@ import hashlib
 import logging
 
 from langchain_core.documents import Document
+from langsmith import traceable
 
-from agentic_rag.config import get_settings
+from agentic_rag.config import get_settings, setup_langsmith
 from agentic_rag.ingestion.loaders import load_documents
 from agentic_rag.ingestion.splitter import split_documents
+from agentic_rag.ingestion.tracing import summarize_documents
 from agentic_rag.retrieval.vectorstore import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,19 @@ def _chunk_id(chunk: Document) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+@traceable(
+    run_type="chain",
+    name="index_chunks",
+    process_inputs=lambda inputs: {"chunks": summarize_documents(inputs["chunks"])},
+)
+def _index_chunks(chunks: list[Document]) -> int:
+    """Envia os chunks ao vector store; os embeddings aparecem como runs filhos."""
+    vector_store = get_vector_store()
+    vector_store.add_documents(chunks, ids=[_chunk_id(chunk) for chunk in chunks])
+    return len(chunks)
+
+
+@traceable(run_type="chain", name="ingestion", tags=["ingestion"])
 def run_ingestion() -> int:
     """Executa a ingestão completa dos documentos configurados no Settings
 
@@ -37,15 +52,15 @@ def run_ingestion() -> int:
     for chunk in chunks:
         chunk.metadata["embedding_model"] = settings.embedding_model
 
-    vector_store = get_vector_store()
-    vector_store.add_documents(chunks, ids=[_chunk_id(chunk) for chunk in chunks])
+    total = _index_chunks(chunks)
 
-    logger.info("Ingestão concluida: %d chunk(s) indexados", len(chunks))
-    return len(chunks)
+    logger.info("Ingestão concluida: %d chunk(s) indexados", total)
+    return total
 
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    setup_langsmith()
     run_ingestion()

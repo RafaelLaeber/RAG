@@ -5,7 +5,10 @@ from pathlib import Path
 
 import yaml
 from langchain_core.documents import Document
+from langsmith import traceable
 from pypdf import PdfReader
+
+from agentic_rag.ingestion.tracing import summarize_documents
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,12 @@ def _load_pdf(path: Path) -> list[Document]:
     return documents
 
 
+@traceable(
+    run_type="chain",
+    name="load_documents",
+    process_inputs=lambda inputs: {"directory": str(inputs["directory"])},
+    process_outputs=summarize_documents,
+)
 def load_documents(directory: Path) -> list[Document]:
     """Carrega todos os documentos suportados de um diretório.
 
