@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ruff>=0.17",
     "mypy>=2.4",

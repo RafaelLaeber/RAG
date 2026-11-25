@@ -3,8 +3,9 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +43,11 @@ class Settings(BaseSettings):
     memory_max_items: int = Field(default=50, gt=0)
     user_id: str = "colaborador"
 
+    # Resumo da memória de curto prazo: ao passar de summary_trigger_messages mensagens no
+    # contexto, as antigas viram um resumo e só as summary_keep_messages mais recentes ficam
+    summary_trigger_messages: int = Field(default=10, gt=0)
+    summary_keep_messages: int = Field(default=4, gt=0)
+
     # Histórico de conversas (SQLite local)
     conversations_db_path: Path = Path("storage/conversations.sqlite")
     conversations_max_items: int = Field(default=30, gt=0)
@@ -49,6 +55,12 @@ class Settings(BaseSettings):
     # LangSmith (opcional: sem chave, o tracing fica desligado)
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "orbita-agent"
+
+    @model_validator(mode="after")
+    def _check_summary_limits(self) -> Self:
+        if self.summary_keep_messages >= self.summary_trigger_messages:
+            raise ValueError("summary_keep_messages deve ser menor que summary_trigger_messages")
+        return self
 
 
 @lru_cache  # Devolve o mesmo objeto sem precisar recriar

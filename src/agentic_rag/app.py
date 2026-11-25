@@ -15,7 +15,9 @@ from agentic_rag.agent.agent import get_agent
 from agentic_rag.config import get_settings, setup_langsmith
 from agentic_rag.ingestion.pipeline import run_ingestion
 from agentic_rag.memory.conversations import (
+    ConversationSummary,
     StoredMessage,
+    delete_conversation,
     list_conversations,
     load_conversation,
     save_message,
@@ -57,8 +59,12 @@ html, body, .stApp { font-family: "Inter", "Segoe UI", system-ui, sans-serif; }
 /* Sidebar */
 section[data-testid="stSidebar"] { background: var(--side); border-right: 1px solid var(--border); }
 section[data-testid="stSidebar"] > div { padding-top: 0; }
+/* Tira o cabeçalho do fluxo: o botão de recolher fica na mesma linha do título */
+[data-testid="stSidebarHeader"] { position:absolute; top:.85rem; right:.6rem; z-index:10;
+    height:auto; padding:0; margin:0; }
+[data-testid="stSidebarUserContent"] { padding-top:0; }
 section[data-testid="stSidebar"] .block-container { padding: 0 1rem 1rem; }
-.side-title { font-size:1.05rem; font-weight:600; padding:1.1rem .2rem 1rem;
+.side-title { font-size:1.05rem; font-weight:600; padding:1.1rem 3rem 1rem .2rem;
     border-bottom:1px solid var(--border); margin:0 -1rem 1rem; padding-left:1.2rem; }
 .side-label { color: var(--muted); font-size:.7rem; text-transform:uppercase;
     letter-spacing:.1em; margin:1.4rem 0 .5rem; font-weight:600; padding-left:.2rem; }
@@ -68,6 +74,17 @@ section[data-testid="stSidebar"] [class*="st-key-conv-"] button p { overflow:hid
     text-overflow:ellipsis; white-space:nowrap; }
 section[data-testid="stSidebar"] [class*="st-key-conv-active-"] button {
     background: var(--accent-soft); border-color: rgba(216,180,90,.28); }
+/* Linha da conversa: título (estica) + lixeira (fixa); min-width:0 deixa o título truncar */
+section[data-testid="stSidebar"] [class*="st-key-row-"] { gap:.15rem; flex-wrap:nowrap; }
+section[data-testid="stSidebar"] [class*="st-key-row-"] > div { min-width:0; }
+section[data-testid="stSidebar"] [class*="st-key-del-"] { flex:0 0 auto; width:auto; }
+section[data-testid="stSidebar"] [class*="st-key-del-"] button { width:1.9rem; height:1.9rem;
+    min-height:0; padding:0; justify-content:center; border-color: transparent;
+    color: var(--muted); opacity:.35; }
+section[data-testid="stSidebar"] [class*="st-key-row-"]:hover [class*="st-key-del-"] button,
+section[data-testid="stSidebar"] [class*="st-key-del-"] button:focus-visible { opacity:1; }
+section[data-testid="stSidebar"] [class*="st-key-del-"] button:hover { color:#e57373;
+    border-color: transparent; background: rgba(229,115,115,.1); }
 .file-row { display:flex; align-items:center; gap:.55rem; font-size:.8rem; color:#b8b8c0;
     padding:.25rem .2rem; }
 .file-ext { font-size:.6rem; font-weight:700; padding:.08rem .38rem; border-radius:4px;
@@ -92,11 +109,21 @@ section[data-testid="stSidebar"] [class*="st-key-conv-active-"] button {
 .hero .hi { font-size:1.9rem; color: var(--accent); font-weight:400; line-height:1.2; }
 .hero .ask { font-size:2.8rem; color: var(--accent); font-weight:500; line-height:1.15;
     letter-spacing:-.01em; }
-.topbar { position:fixed; top:.9rem; right:1.4rem; z-index:5; font-size:.75rem;
+.topbar { position:fixed; top:.9rem; right:4.2rem; z-index:5; font-size:.75rem;
     color: var(--muted); display:flex; gap:.5rem; align-items:center; }
 .chip { padding:.22rem .65rem; border:1px solid var(--border); border-radius:999px;
     background: var(--side); }
 .chip b { color: var(--accent); font-weight:500; }
+/* Engrenagem fixa no canto superior direito */
+/* z-index acima do stHeader (fixo, transparente), que cobre o topo e captura os cliques */
+.st-key-settings { position:fixed; top:.65rem; right:1.4rem; z-index:1000000; width:auto; }
+.st-key-settings button { width:2.2rem; height:2.2rem; min-height:0; padding:0;
+    justify-content:center; border-radius:999px; background: var(--side); color: var(--muted); }
+
+/* Modal */
+[data-testid="stDialog"] [role="dialog"] { background: var(--side);
+    border:1px solid var(--border); border-radius:14px; }
+.dialog-hint { color: var(--muted); font-size:.82rem; margin-bottom:.8rem; }
 
 /* Sugestões */
 .main .stButton > button { justify-content:center; text-align:center; background: var(--card);
@@ -168,6 +195,70 @@ def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def remove_conversation(conversation_id: str) -> None:
+    """Apaga a conversa do SQLite e do checkpointer; se era a ativa, abre uma nova."""
+    delete_conversation(get_settings().user_id, conversation_id)
+    agent, _ = load_agent()
+    agent.checkpointer.delete_thread(conversation_id)
+    if conversation_id == st.session_state.thread_id:
+        new_conversation()
+
+
+def ask_delete(conversation_id: str, title: str) -> None:
+    """Marca a conversa para apagar; o modal de confirmação abre no rerun."""
+    st.session_state.delete_target = (conversation_id, title)
+
+
+def clear_delete_target() -> None:
+    """Esquece a conversa marcada para apagar (fecha a confirmação)."""
+    st.session_state.pop("delete_target", None)
+
+
+# A conversa a apagar fica no session_state (e não só no clique da lixeira) para o modal
+# continuar aberto nos reruns; fechar pelo X/ESC/clique fora limpa o alvo via on_dismiss.
+@st.dialog(
+    "Apagar conversa?", icon=":material/delete:", width="small", on_dismiss=clear_delete_target
+)
+def confirm_delete_dialog(conversation_id: str, title: str) -> None:
+    """Confirmação antes de apagar uma conversa do histórico."""
+    st.markdown(
+        f'<div class="dialog-hint">A conversa <b>{_esc(title)}</b> e todas as mensagens dela '
+        "serão apagadas. Essa ação não pode ser desfeita.</div>",
+        unsafe_allow_html=True,
+    )
+    cancel, confirm = st.columns(2)
+    if cancel.button("Cancelar", key="confirm-cancel"):
+        clear_delete_target()
+        st.rerun()
+    if confirm.button("Apagar", key="confirm-delete", type="primary", icon=":material/delete:"):
+        clear_delete_target()
+        remove_conversation(conversation_id)
+        st.rerun()
+
+
+def render_conversation_item(conv: ConversationSummary) -> None:
+    """Linha do histórico: botão que abre a conversa + lixeira discreta."""
+    active = conv.id == st.session_state.thread_id
+    prefix = "conv-active" if active else "conv"
+    with st.container(key=f"row-{conv.id}", horizontal=True, vertical_alignment="center", gap=None):
+        if st.button(
+            conv.title,
+            key=f"{prefix}-{conv.id}",
+            help=f"{conv.updated_at.astimezone():%d/%m/%Y %H:%M}",
+            width="stretch",
+        ):
+            open_conversation(conv.id)
+            st.rerun()
+        st.button(
+            "",
+            key=f"del-{conv.id}",
+            icon=":material/delete:",
+            help="Apagar conversa",
+            on_click=ask_delete,
+            args=(conv.id, conv.title),
+        )
+
+
 def render_sidebar(tracing: bool) -> None:
     with st.sidebar:
         st.markdown('<div class="side-title">Assistente Órbita</div>', unsafe_allow_html=True)
@@ -181,38 +272,9 @@ def render_sidebar(tracing: bool) -> None:
         if not conversations:
             st.caption("Nenhuma conversa ainda.")
         for conv in conversations:
-            active = conv.id == st.session_state.thread_id
-            prefix = "conv-active" if active else "conv"
-            if st.button(
-                conv.title,
-                key=f"{prefix}-{conv.id}",
-                help=f"{conv.updated_at.astimezone():%d/%m/%Y %H:%M}",
-            ):
-                open_conversation(conv.id)
-                st.rerun()
-
-        # Base de conhecimento
-        st.markdown('<div class="side-label">Base de conhecimento</div>', unsafe_allow_html=True)
-        files = list_data_files()
-        if files:
-            rows = "".join(
-                f'<div class="file-row"><span class="file-ext">'
-                f"{p.suffix.lstrip('.').upper() or '—'}</span>"
-                f'<span class="file-name">{_esc(p.name)}</span></div>'
-                for p in files
-            )
-            st.markdown(rows, unsafe_allow_html=True)
-        else:
-            st.caption("Nenhum arquivo em data/raw.")
-
-        st.write("")
-        if st.button("Gerar embeddings", disabled=not files, icon=":material/database:"):
-            with st.spinner(f"Indexando {len(files)} arquivo(s)…"):
-                try:
-                    total = run_ingestion()
-                    st.success(f"{total} chunks indexados.")
-                except Exception as exc:  # noqa: BLE001 - mostrar qualquer falha ao usuário
-                    st.error(f"Falha na ingestão: {exc}")
+            render_conversation_item(conv)
+        if target := st.session_state.get("delete_target"):
+            confirm_delete_dialog(*target)
 
         st.markdown(
             f'<div class="side-label">Sessão</div><div class="side-meta">'
@@ -222,12 +284,46 @@ def render_sidebar(tracing: bool) -> None:
         )
 
 
+@st.dialog("Base de conhecimento", icon=":material/database:", width="medium")
+def knowledge_dialog() -> None:
+    """Modal com os arquivos de data/raw e o botão para gerar os embeddings."""
+    files = list_data_files()
+    st.markdown(
+        '<div class="dialog-hint">Arquivos de <code>data/raw</code> indexados no Astra DB. '
+        "Gere os embeddings de novo sempre que os documentos mudarem.</div>",
+        unsafe_allow_html=True,
+    )
+    if files:
+        rows = "".join(
+            f'<div class="file-row"><span class="file-ext">'
+            f"{p.suffix.lstrip('.').upper() or '—'}</span>"
+            f'<span class="file-name">{_esc(p.name)}</span></div>'
+            for p in files
+        )
+        st.markdown(rows, unsafe_allow_html=True)
+    else:
+        st.caption("Nenhum arquivo em data/raw.")
+
+    st.write("")
+    if st.button(
+        "Gerar embeddings", type="primary", disabled=not files, icon=":material/database:"
+    ):
+        with st.spinner(f"Indexando {len(files)} arquivo(s)…"):
+            try:
+                total = run_ingestion()
+                st.success(f"{total} chunks indexados.")
+            except Exception as exc:  # noqa: BLE001 - mostrar qualquer falha ao usuário
+                st.error(f"Falha na ingestão: {exc}")
+
+
 def render_topbar() -> None:
     st.markdown(
         f'<div class="topbar"><span class="chip">Modelo <b>{_esc(get_settings().llm_model)}</b>'
         "</span></div>",
         unsafe_allow_html=True,
     )
+    if st.button("", key="settings", icon=":material/settings:", help="Base de conhecimento"):
+        knowledge_dialog()
 
 
 def render_message(msg: dict[str, Any]) -> None:
@@ -273,8 +369,11 @@ def run_agent(question: str) -> None:
                 context=context,
                 stream_mode="updates",
             ):
-                for step in update.values():
-                    if not isinstance(step, dict):
+                for node, step in update.items():
+                    # Só o nó "model" traz mensagens novas do LLM. O resumo
+                    # (SummarizationMiddleware) devolve as mensagens antigas preservadas,
+                    # que seriam mostradas de novo como se fossem chamadas deste turno.
+                    if node != "model" or not isinstance(step, dict):
                         continue
                     for message in step.get("messages", []):
                         if isinstance(message, AIMessage) and message.tool_calls:

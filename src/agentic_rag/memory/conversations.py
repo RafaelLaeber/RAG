@@ -126,6 +126,18 @@ def load_conversation(user_id: str, conversation_id: str) -> list[StoredMessage]
     return [StoredMessage(role, content, json.loads(tools)) for role, content, tools in rows]
 
 
+def delete_conversation(user_id: str, conversation_id: str) -> bool:
+    """Apaga a conversa e suas mensagens (ON DELETE CASCADE), só se for do usuário.
+
+    Retorna True se alguma conversa foi apagada.
+    """
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM conversations WHERE id = ? AND user_id = ?", (conversation_id, user_id)
+        )
+    return cursor.rowcount > 0
+
+
 def to_agent_messages(messages: list[StoredMessage]) -> list[AnyMessage]:
     """Converte o histórico salvo em mensagens do agente (só o texto, sem chamadas de tool).
 

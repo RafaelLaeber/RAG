@@ -38,14 +38,53 @@ def get_memory_store() -> SqliteStore:
     return store
 
 
-def save_user_memory(store: SqliteStore, user_id: str, content: str) -> None:
-    """Grava um fato sobre o usuário."""
-    store.put(_namespace(user_id), str(uuid.uuid4()), {"content": content})
+@dataclass(frozen=True)
+class Memory:
+    """Fato guardado sobre o usuário, com o id usado para atualizá-lo ou apagá-lo."""
+
+    id: str
+    content: str
 
 
-def load_user_memories(store: SqliteStore, user_id: str) -> list[str]:
+def save_user_memory(store: SqliteStore, user_id: str, content: str) -> str:
+    """Grava um fato sobre o usuário e devolve o id gerado."""
+    memory_id = str(uuid.uuid4())
+    store.put(_namespace(user_id), memory_id, {"content": content})
+    return memory_id
+
+
+def load_user_memories(store: SqliteStore, user_id: str) -> list[Memory]:
     """Lista os fatos guardados do usuário (mais antigos primeiro)."""
     limit = get_settings().memory_max_items
     items = store.search(_namespace(user_id), limit=limit)
     items.sort(key=lambda item: item.created_at)
-    return [item.value["content"] for item in items]
+    return [Memory(id=item.key, content=item.value["content"]) for item in items]
+
+
+def _exists(store: SqliteStore, user_id: str, memory_id: str) -> bool:
+    """Diz se o id existe no namespace do usuário (memória de outro usuário não conta)."""
+    return store.get(_namespace(user_id), memory_id) is not None
+
+
+def update_user_memory(store: SqliteStore, user_id: str, memory_id: str, content: str) -> bool:
+    """Substitui o conteúdo de um fato do usuário.
+
+    Returns:
+        False se o id não existir entre as memórias desse usuário.
+    """
+    if not _exists(store, user_id, memory_id):
+        return False
+    store.put(_namespace(user_id), memory_id, {"content": content})
+    return True
+
+
+def delete_user_memory(store: SqliteStore, user_id: str, memory_id: str) -> bool:
+    """Apaga um fato do usuário.
+
+    Returns:
+        False se o id não existir entre as memórias desse usuário.
+    """
+    if not _exists(store, user_id, memory_id):
+        return False
+    store.delete(_namespace(user_id), memory_id)
+    return True
