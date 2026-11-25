@@ -62,9 +62,7 @@ export default function AuthForm({ mode, onSubmit }: Props) {
           <img className="brand-logo" src="/vega-logo.png" alt="" />
           Vega
         </h1>
-        <p className="auth-sub">
-          {isRegister ? 'Crie sua conta para começar.' : 'Entre para continuar.'}
-        </p>
+        {isRegister && <p className="auth-sub">Crie sua conta para começar.</p>}
 
         {formError && (
           <div className="form-alert" role="alert">
@@ -151,6 +149,8 @@ export default function AuthForm({ mode, onSubmit }: Props) {
             </>
           )}
         </p>
+
+        <p className="auth-version">Versão {__APP_VERSION__}</p>
       </form>
     </main>
   )

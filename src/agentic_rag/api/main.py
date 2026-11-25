@@ -74,7 +74,7 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Assistente Vega",
-        version="2.0.0",
+        version="2.0.1",
         description=DESCRIPTION,
         openapi_tags=TAGS,
         swagger_ui_parameters={"defaultModelsExpandDepth": 0},  # esconde os schemas no fim

@@ -274,10 +274,11 @@ npm run build          # checagem de tipos (tsc) e build
 
 ## Versões
 
-O Vega segue o versionamento semântico (`MAJOR.MINOR.PATCH`). As regras de quando subir cada número estão no `AGENTS.md`, e cada versão tem uma tag `vX.Y.Z` no Git.
+O Vega segue o versionamento semântico (`MAJOR.MINOR.PATCH`). As regras de quando subir cada número estão no `AGENTS.md`, e cada versão tem uma tag `vX.Y.Z` no Git. A versão aparece no Swagger e no rodapé da tela de login, lida do `frontend/package.json` no build.
 
 | Versão | Principais mudanças |
 |---|---|
+| **2.0.1** | Tela de login com a logo e o nome centralizados, sem o subtítulo, e a versão do projeto no rodapé (lida do `frontend/package.json` no build). |
 | **2.0.0** | Autenticação JWT: JWT de acesso (15 min, cookie `vega_access` ou header `Bearer`) e refresh token (7 dias, cookie `vega_refresh`), com renovação automática na interface e revogação imediata. Quebra compatibilidade: o cookie `vega_session` deixou de valer (todos entram de novo) e login e registro passaram a responder `{user, access_token, ...}`. Também: aba **Gerenciar usuários** (criar, editar e apagar contas), exclusão de documentos um a um ou de todos, e rolagem nas listas longas. |
 | **1.0.0** | Primeira versão versionada: API FastAPI e interface React (no lugar do Streamlit), registro e login com contas separadas, administradores, upload de documentos, guardrails contra prompt injection, memória de curto prazo, longo prazo e histórico em SQLite, e o assistente renomeado para Vega, sem empresa fixa. |
 

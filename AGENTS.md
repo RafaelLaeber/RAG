@@ -17,7 +17,7 @@ Ao subir o MAJOR, o MINOR e o PATCH voltam a zero; ao subir o MINOR, o PATCH vol
 
 Ao mudar a versão:
 
-1. Atualize o número, igual, nos três lugares: `pyproject.toml` (`version`, depois `uv lock`), `frontend/package.json` (com `npm version X.Y.Z --no-git-tag-version` dentro de `frontend/`, que também atualiza o `package-lock.json`) e `src/agentic_rag/api/main.py` (`version=` do FastAPI, que aparece no Swagger).
+1. Atualize o número, igual, nos três lugares: `pyproject.toml` (`version`, depois `uv lock`), `frontend/package.json` (com `npm version X.Y.Z --no-git-tag-version` dentro de `frontend/`, que também atualiza o `package-lock.json`) e `src/agentic_rag/api/main.py` (`version=` do FastAPI, que aparece no Swagger). A versão mostrada na tela de login vem do `frontend/package.json` no build (`__APP_VERSION__` em `vite.config.ts`), então acompanha sozinha: só é preciso gerar o build de novo.
 2. Registre a versão no `README.md` (seção **Versões**) e, se existir, no `explicacao.md`, com as principais mudanças.
 3. Faça o commit com a versão na mensagem (ex.: `release: v1.1.0 ...`) e crie a tag anotada `vX.Y.Z` nesse commit (`git tag -a v1.1.0 -m "Vega 1.1.0"`).
 
