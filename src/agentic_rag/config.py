@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data/raw")
     chunk_size: int = Field(default=1000, gt=0)
     chunk_overlap: int = Field(default=150, ge=0)
+    upload_max_mb: int = Field(default=20, gt=0)  # tamanho máximo de um arquivo enviado
 
     # Retriever
-    retriever_k: int = Field(default=4, gt=0)
+    retriever_k: int = Field(default=5, gt=0)
 
     # Câmbio (AwesomeAPI, sem chave)
     exchange_api_url: str = "https://economia.awesomeapi.com.br/json/last"
@@ -40,13 +41,19 @@ class Settings(BaseSettings):
 
     # Memória de longo prazo (SQLite local)
     memory_db_path: Path = Path("storage/memory.sqlite")
-    memory_max_items: int = Field(default=50, gt=0)
-    user_id: str = "colaborador"
+    memory_max_items: int = Field(default=50, gt=0)  # fatos por colaborador
+    memory_max_chars: int = Field(default=200, gt=0)  # tamanho máximo de cada fato
+    user_id: str = "Rafael"
 
-    # Resumo da memória de curto prazo: ao passar de summary_trigger_messages mensagens no
-    # contexto, as antigas viram um resumo e só as summary_keep_messages mais recentes ficam
-    summary_trigger_messages: int = Field(default=10, gt=0)
-    summary_keep_messages: int = Field(default=4, gt=0)
+    # Memória de curto prazo (checkpoints do LangGraph em SQLite, sobrevive a reinícios)
+    checkpoints_db_path: Path = Path("storage/checkpoints.sqlite")
+
+    # Resumo da memória de curto prazo: ao passar de summary_trigger_tokens tokens nas
+    # mensagens da conversa, as antigas viram um resumo e ficam inteiras só as mais recentes,
+    # até somar cerca de summary_keep_tokens. Medido em tokens (e não em mensagens) para o
+    # resumo não rodar a cada turno com tools, que gera várias mensagens curtas.
+    summary_trigger_tokens: int = Field(default=12_000, gt=0)
+    summary_keep_tokens: int = Field(default=4_000, gt=0)
 
     # Histórico de conversas (SQLite local)
     conversations_db_path: Path = Path("storage/conversations.sqlite")
@@ -58,8 +65,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_summary_limits(self) -> Self:
-        if self.summary_keep_messages >= self.summary_trigger_messages:
-            raise ValueError("summary_keep_messages deve ser menor que summary_trigger_messages")
+        if self.summary_keep_tokens >= self.summary_trigger_tokens:
+            raise ValueError("summary_keep_tokens deve ser menor que summary_trigger_tokens")
         return self
 
 

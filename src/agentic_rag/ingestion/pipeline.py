@@ -1,12 +1,16 @@
-"""Pipeline de ingestão: carregar, dividir e indexar os documentos no vector store."""
+"""Pipeline de ingestão: carregar, dividir e sincronizar os documentos com o vector store."""
 
 import hashlib
+import json
 import logging
+from dataclasses import asdict, dataclass
 
+from langchain_astradb import AstraDBVectorStore
 from langchain_core.documents import Document
 from langsmith import traceable
 
 from agentic_rag.config import get_settings, setup_langsmith
+from agentic_rag.guardrails.detection import find_injection_signals
 from agentic_rag.ingestion.loaders import load_documents
 from agentic_rag.ingestion.splitter import split_documents
 from agentic_rag.ingestion.tracing import summarize_documents
@@ -15,47 +19,101 @@ from agentic_rag.retrieval.vectorstore import get_vector_store
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class IngestionResult:
+    """Resultado da sincronização com o vector store."""
+
+    total: int  # chunks na base após a ingestão
+    added: int  # chunks novos ou alterados (embeddings gerados)
+    deleted: int  # chunks antigos removidos (documento editado ou apagado)
+
+
 def _chunk_id(chunk: Document) -> str:
-    """Gera um ID estável a partir da origem e do conteúdo do chunk"""
-    key = f"{chunk.metadata['source']}|{chunk.metadata.get('page')}|{chunk.page_content}"
+    """ID estável do chunk: muda se o texto ou qualquer metadado mudar.
+
+    Os metadados entram no hash para que mudar só o front matter (ex.: status de
+    "vigente" para "substituida") também gere um chunk novo e apague o antigo.
+    """
+    metadata = json.dumps(chunk.metadata, sort_keys=True, ensure_ascii=False, default=str)
+    key = f"{metadata}|{chunk.page_content}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _existing_ids(vector_store: AstraDBVectorStore) -> set[str]:
+    """IDs de todos os chunks hoje na collection (só o _id, sem texto nem vetor)."""
+    vector_store.astra_env.ensure_db_setup()
+    cursor = vector_store.astra_env.collection.find({}, projection={"_id": True})
+    return {str(doc["_id"]) for doc in cursor}
 
 
 @traceable(
     run_type="chain",
-    name="index_chunks",
+    name="sync_chunks",
     process_inputs=lambda inputs: {"chunks": summarize_documents(inputs["chunks"])},
+    process_outputs=asdict,
 )
-def _index_chunks(chunks: list[Document]) -> int:
-    """Envia os chunks ao vector store; os embeddings aparecem como runs filhos."""
+def _sync_chunks(chunks: list[Document]) -> IngestionResult:
+    """Deixa a collection igual aos chunks atuais; os embeddings aparecem como runs filhos.
+
+    Primeiro grava os chunks novos e só depois apaga os antigos, para a base nunca
+    ficar vazia no meio da ingestão. Chunks que não mudaram não geram embedding de novo.
+    """
+    by_id = {_chunk_id(chunk): chunk for chunk in chunks}  # chunks idênticos viram um só
     vector_store = get_vector_store()
-    vector_store.add_documents(chunks, ids=[_chunk_id(chunk) for chunk in chunks])
-    return len(chunks)
+    existing = _existing_ids(vector_store)
+
+    new_ids = [chunk_id for chunk_id in by_id if chunk_id not in existing]
+    if new_ids:
+        vector_store.add_documents([by_id[chunk_id] for chunk_id in new_ids], ids=new_ids)
+
+    stale_ids = existing - by_id.keys()
+    if stale_ids:
+        vector_store.delete(ids=list(stale_ids))
+
+    return IngestionResult(total=len(by_id), added=len(new_ids), deleted=len(stale_ids))
 
 
-@traceable(run_type="chain", name="ingestion", tags=["ingestion"])
-def run_ingestion() -> int:
-    """Executa a ingestão completa dos documentos configurados no Settings
+@traceable(run_type="chain", name="ingestion", tags=["ingestion"], process_outputs=asdict)
+def run_ingestion() -> IngestionResult:
+    """Sincroniza a collection com os documentos de `data_dir`.
 
-    Rodar mais de uma vez não duplica os chunks: cada chunk tem um ID estável e o vector sore
-    sobrescreve o resgistro existente.
+    A pasta é a fonte da verdade: chunks de documentos editados ou removidos são
+    apagados da collection, e rodar de novo sem mudanças não altera nada.
 
     Returns:
-        Quantidade de chunks enviados ao vector store.
-    """
+        Quantos chunks a base tem e quantos foram adicionados e removidos.
 
+    Raises:
+        ValueError: Se nenhum chunk for gerado (evita esvaziar a base por engano).
+    """
     settings = get_settings()
 
     documents = load_documents(settings.data_dir)
+    for doc in documents:
+        # Só alerta: o documento é indexado mesmo assim e, na consulta, chega ao agente
+        # envelopado como dado não confiável (guardrails/middleware.py)
+        if signals := find_injection_signals(doc.page_content):
+            logger.warning(
+                "Possível instrução embutida em %s (página %s): %s",
+                doc.metadata.get("source"),
+                doc.metadata.get("page", "-"),
+                signals,
+            )
     chunks = split_documents(documents, settings.chunk_size, settings.chunk_overlap)
+    if not chunks:
+        raise ValueError(f"Nenhum documento com texto em {settings.data_dir}; base mantida.")
 
     for chunk in chunks:
         chunk.metadata["embedding_model"] = settings.embedding_model
 
-    total = _index_chunks(chunks)
-
-    logger.info("Ingestão concluida: %d chunk(s) indexados", total)
-    return total
+    result = _sync_chunks(chunks)
+    logger.info(
+        "Ingestão concluída: %d chunk(s) na base, %d adicionado(s), %d removido(s)",
+        result.total,
+        result.added,
+        result.deleted,
+    )
+    return result
 
 
 if __name__ == "__main__":

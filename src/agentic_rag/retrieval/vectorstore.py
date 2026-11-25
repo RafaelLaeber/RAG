@@ -1,13 +1,12 @@
 """Factory do vector store (AstraDB)"""
 
 from langchain_astradb import AstraDBVectorStore
-from langchain_core.vectorstores import VectorStore
 
 from agentic_rag.config import get_settings
 from agentic_rag.llm import get_embeddings
 
 
-def get_vector_store() -> VectorStore:
+def get_vector_store() -> AstraDBVectorStore:
     """Conecta ao Astra DB, criando a collection se ela ainda não existir
 
     Returns:

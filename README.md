@@ -14,6 +14,7 @@ Projeto da disciplina de LangChain (pós-graduação Infnet), construído com **
 - **Lembra do colaborador entre conversas:** guarda fatos sobre ele (nome, cidade, cargo) e os corrige ou apaga quando mudam, se repetem ou quando ele pede para esquecer.
 - **Guarda o histórico:** as conversas ficam salvas, podem ser reabertas pela barra lateral e apagadas pelo ícone de lixeira.
 - **Ignora políticas desatualizadas:** documentos marcados como `substituida` ficam fora da busca.
+- **Não obedece a documentos:** todo conteúdo externo (documentos, API, memórias) é tratado como dado não confiável. Instruções embutidas nele são ignoradas (veja [Segurança](#segurança-prompt-injection)).
 
 ## Arquitetura
 
@@ -26,7 +27,7 @@ Usuário (navegador)
       │                      │  middleware: resumo da conversa + memórias no system prompt
       │                      │  o LLM (gpt-6-luna) decide a cada passo
       │                      ├── search_policies ──► get_retriever() ──► Astra DB
-      │                      ├── get_exchange_rate ──► AwesomeAPI (cotação em BRL)
+      │                      ├── convert_currency / get_exchange_rate ──► AwesomeAPI (BRL)
       │                      └── save / update / delete_memory ──► SQLite (fatos do colaborador)
       │                      │
       │                      ▼
@@ -45,7 +46,7 @@ Todas as execuções (agente, embeddings e ingestão) são registradas no LangSm
 
 | Camada | O que guarda | Onde |
 |---|---|---|
-| Curto prazo | Mensagens da conversa atual (com resumo das antigas) | RAM (`InMemorySaver`), por `thread_id` |
+| Curto prazo | Contexto do agente na conversa: mensagens, chamadas de tool e resumo das antigas | `storage/checkpoints.sqlite` (`SqliteSaver`), por `thread_id` |
 | Longo prazo | Fatos sobre o colaborador | `storage/memory.sqlite` (`SqliteStore`), por `user_id` |
 | Histórico | Todas as conversas e mensagens, para exibir e reabrir | `storage/conversations.sqlite`, por `user_id` |
 
@@ -61,8 +62,13 @@ src/agentic_rag/
 │   └── retriever.py       # retriever com filtro de status
 ├── tools/
 │   ├── rag_tool.py        # search_policies
-│   ├── api_tool.py        # get_exchange_rate
+│   ├── api_tool.py        # get_exchange_rate, convert_currency
 │   └── memory_tool.py     # save_memory, update_memory, delete_memory
+├── guardrails/            # proteção contra prompt injection
+│   ├── untrusted.py       # envelope de dados externos (tag com sufixo aleatório)
+│   ├── detection.py       # heurística de instruções embutidas
+│   ├── memory.py          # validação dos fatos antes de gravar
+│   └── middleware.py      # envelopa todo resultado de tool
 ├── agent/
 │   ├── prompts.py         # system prompt e prompt de resumo
 │   └── agent.py           # get_agent()
@@ -110,12 +116,13 @@ Um valor por linha, sem aspas extras nem quebras de linha. Os demais parâmetros
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `SUMMARY_TRIGGER_MESSAGES` | `10` | Mensagens no contexto que disparam o resumo (chamadas e respostas de tool também contam) |
-| `SUMMARY_KEEP_MESSAGES` | `4` | Mensagens recentes mantidas inteiras após o resumo (precisa ser menor que o anterior) |
-| `MEMORY_MAX_ITEMS` | `50` | Máximo de fatos do colaborador injetados no prompt |
+| `SUMMARY_TRIGGER_TOKENS` | `12000` | Tokens nas mensagens da conversa que disparam o resumo (resultados de tool também contam) |
+| `SUMMARY_KEEP_TOKENS` | `4000` | Tokens das mensagens mais recentes mantidas inteiras após o resumo (precisa ser menor que o anterior) |
+| `MEMORY_MAX_ITEMS` | `50` | Máximo de fatos por colaborador (passou disso, o agente precisa atualizar ou apagar antes de salvar) |
+| `MEMORY_MAX_CHARS` | `200` | Tamanho máximo de cada fato |
 | `CONVERSATIONS_MAX_ITEMS` | `30` | Conversas listadas na barra lateral |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | Tamanho e sobreposição dos chunks |
-| `RETRIEVER_K` | `4` | Trechos devolvidos por busca |
+| `RETRIEVER_K` | `5` | Trechos devolvidos por busca |
 
 ## Uso
 
@@ -125,7 +132,7 @@ Um valor por linha, sem aspas extras nem quebras de linha. Os demais parâmetros
 uv run python -m agentic_rag.ingestion.pipeline
 ```
 
-Rodar de novo não duplica os chunks: o ID de cada um é o hash do conteúdo.
+A ingestão sincroniza a collection com `data/raw`: o ID de cada chunk é o hash do texto e dos metadados, então chunks iguais não geram embedding de novo, e chunks de documentos editados ou removidos (ou de outro `chunk_size`/modelo de embedding) são apagados. Rodar de novo sem mudanças não altera nada. Use uma collection exclusiva para o projeto, porque tudo o que não vier de `data/raw` é removido.
 
 **2. Conversar com o agente:**
 
@@ -141,34 +148,46 @@ Você: Qual o limite de reembolso para refeição em viagem?
 Assistente: O limite é de R$ 110,00 por refeição (orbita_politica_reembolso_2026.md).
 
 Você: Gastei 30 dólares numa refeição em Nova York, quanto recebo?
-  [get_exchange_rate] {'currency': 'USD'}
+  [convert_currency] {'amount': 30, 'currency': 'USD'}
 Assistente: US$ 30 × R$ 5,5085 = R$ 165,26. Como o limite é R$ 110,00, o reembolso é de R$ 110,00.
 
 Você: E se fossem 30 euros?
-  [get_exchange_rate] {'currency': 'EUR'}
+  [convert_currency] {'amount': 30, 'currency': 'EUR'}
 Assistente: €30 × R$ 6,1795 = R$ 185,39. Também passa do limite: reembolso de R$ 110,00.
 ```
 
 Na interface:
-- as ferramentas usadas em cada resposta aparecem num bloco recolhível acima dela;
+- a resposta aparece em streaming, token a token, enquanto o modelo escreve;
+- acima de cada resposta aparece um bloco compacto com o total de ferramentas usadas ("3 ferramentas usadas"). Ao clicar, ele abre a lista no próprio chat, e cada ferramenta abre os argumentos que recebeu;
 - a barra lateral lista as conversas salvas: clique para reabrir, ou passe o mouse e use a **lixeira** para apagar (com confirmação);
 - **Nova conversa** começa do zero, mas o agente continua lembrando dos fatos sobre o colaborador.
+
+## Segurança (prompt injection)
+
+Quem consegue colocar um arquivo em `data/raw` não deve conseguir dar ordens ao agente. Por isso, todo conteúdo que não vem do colaborador é tratado como **dado não confiável**, em camadas:
+
+1. **Envelope** (`guardrails/untrusted.py` + `middleware.py`): todo resultado de tool e a memória de longo prazo chegam ao LLM entre `<dados_externos_XXXXXXXX>` e `</dados_externos_XXXXXXXX>`, com um sufixo aleatório a cada chamada. Assim, o documento não consegue fechar a tag para se passar por instrução. O middleware fica no agente, então tools novas são cobertas automaticamente.
+2. **Regra no system prompt:** o conteúdo das tags é só dado. Se ele pedir para ignorar regras, mudar de papel, chamar tools ou mexer na memória, o agente não obedece e avisa o colaborador.
+3. **Detecção** (`guardrails/detection.py`): padrões de injeção em português e inglês. Nos documentos, só alerta: registra no log (na ingestão e na consulta) e marca o envelope com `alerta`. Na memória, bloqueia.
+4. **Memória validada** (`guardrails/memory.py`): fatos com mais de `MEMORY_MAX_CHARS` caracteres, com marcação (`< > [ ]`) ou com cara de instrução são recusados, porque uma memória vai para o prompt de todas as conversas futuras.
+
+Nenhuma dessas camadas elimina prompt injection por completo: a heurística é contornável, e o envelope reduz o risco sem zerá-lo. O que limita o estrago é o agente ter poucos poderes. O pior que um documento malicioso consegue é distorcer uma resposta.
 
 ## Observabilidade (LangSmith)
 
 Com `LANGSMITH_API_KEY` no `.env`, a barra lateral mostra `LangSmith: ligado` e tudo vira trace no projeto `orbita-agent`:
 
 - **Cada pergunta** vira um trace `orbita_agent`, com as chamadas ao LLM, as tools, o embedding da pergunta (`embed_query`), o resumo da conversa (quando acontece), os tokens, o custo e a latência. Os turnos de uma mesma conversa ficam agrupados na aba **Threads** (pelo `thread_id`).
-- **Cada ingestão** vira um trace `ingestion`, com `load_documents`, `split_documents` e `index_chunks`, e dentro dele os `embed_documents`.
+- **Cada ingestão** vira um trace `ingestion`, com `load_documents`, `split_documents` e `sync_chunks` (quantos chunks foram adicionados e removidos), e dentro dele os `embed_documents`.
 
 Os traces de embedding e de ingestão registram só resumos (quantidade de documentos, fontes, dimensão dos vetores), sem o texto completo nem os vetores.
 
 ## Limitações conhecidas
 
 - **Hibernação do Astra DB (plano gratuito):** depois de um tempo sem uso, o banco hiberna e a primeira requisição falha com `400`. Acorde o banco pelo painel do Astra antes de usar.
-- **Contexto do agente só na sessão:** o contexto fica na memória do processo (`InMemorySaver`) e se perde ao reiniciar o app. Ao reabrir uma conversa antiga, o histórico salvo é reenviado ao agente (só o texto, sem as chamadas de tool).
+- **Conversas anteriores ao checkpointer em SQLite:** essas conversas não têm checkpoint. Ao reabrir uma delas, o histórico salvo é reenviado ao agente (só o texto, sem as chamadas de tool).
+- **Turnos com falha:** se o agente falhar no meio de uma resposta, o turno é desfeito. A pergunta e o aviso de erro aparecem só na tela, não entram no histórico nem no contexto, e o erro técnico vai para o log.
 - **Reiniciar após mudar o agente:** o agente é criado uma vez por processo (`st.cache_resource`). Mudanças em tools, prompts ou no agente só valem depois de reiniciar o Streamlit.
-- **Chunks órfãos:** editar um documento ou mudar `chunk_size`/modelo gera IDs novos, e os chunks antigos continuam no banco. Apague a collection antes de reindexar.
 - **Caminhos relativos:** `storage/` e `data/raw` são resolvidos a partir da pasta onde o comando roda. Rode sempre da raiz do projeto.
 
 ## Desenvolvimento

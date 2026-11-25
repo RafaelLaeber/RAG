@@ -1,7 +1,7 @@
 """Histórico de conversas: cada usuário tem conversas e cada conversa guarda todas as mensagens.
 
-Fica em SQLite, separado da memória de longo prazo (fatos) e do InMemorySaver (contexto do
-agente na sessão). Serve para listar e reabrir conversas antigas.
+Fica em SQLite, separado da memória de longo prazo (fatos) e dos checkpoints do agente
+(contexto que o LLM vê). Serve para listar e reabrir conversas antigas.
 """
 
 import json
@@ -79,25 +79,38 @@ def _make_title(text: str) -> str:
     return title if len(title) <= TITLE_MAX_CHARS else title[: TITLE_MAX_CHARS - 1] + "…"
 
 
-def save_message(
+def save_turn(
     user_id: str,
     conversation_id: str,
-    role: str,
-    content: str,
+    question: str,
+    answer: str,
     tools: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Grava uma mensagem, criando a conversa na primeira vez (título = primeira mensagem)."""
+    """Grava a pergunta e a resposta de um turno numa única transação.
+
+    Cria a conversa na primeira vez (título = primeira pergunta). Gravar as duas juntas
+    garante que o histórico nunca fique com uma pergunta sem resposta.
+    """
     now = _now()
     with _connect() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO conversations (id, user_id, title, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (conversation_id, user_id, _make_title(content), now, now),
+            (conversation_id, user_id, _make_title(question), now, now),
         )
-        conn.execute(
+        conn.executemany(
             "INSERT INTO messages (conversation_id, role, content, tools, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (conversation_id, role, content, json.dumps(tools or [], ensure_ascii=False), now),
+            [
+                (conversation_id, "user", question, "[]", now),
+                (
+                    conversation_id,
+                    "assistant",
+                    answer,
+                    json.dumps(tools or [], ensure_ascii=False),
+                    now,
+                ),
+            ],
         )
         conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
 
@@ -141,7 +154,7 @@ def delete_conversation(user_id: str, conversation_id: str) -> bool:
 def to_agent_messages(messages: list[StoredMessage]) -> list[AnyMessage]:
     """Converte o histórico salvo em mensagens do agente (só o texto, sem chamadas de tool).
 
-    Usado para reabrir uma conversa antiga: o InMemorySaver não sobrevive ao processo,
-    então o contexto é reconstruído a partir do SQLite.
+    Usado para reabrir conversas sem checkpoint (ex.: gravadas antes do checkpointer em
+    SQLite): o contexto do agente é reconstruído a partir do histórico.
     """
     return [HumanMessage(m.content) if m.role == "user" else AIMessage(m.content) for m in messages]

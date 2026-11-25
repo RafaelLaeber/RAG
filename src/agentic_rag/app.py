@@ -3,27 +3,43 @@
 Uso: streamlit run src/agentic_rag/app.py
 """
 
+import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
-from agentic_rag.agent.agent import get_agent
+from agentic_rag.agent.agent import get_agent, rollback_turn
 from agentic_rag.config import get_settings, setup_langsmith
+from agentic_rag.guardrails.middleware import PROMPT_PROTECTION_NODE
 from agentic_rag.ingestion.pipeline import run_ingestion
+from agentic_rag.ingestion.uploads import (
+    SUPPORTED_EXTENSIONS,
+    UploadCheck,
+    check_upload,
+    save_upload,
+)
 from agentic_rag.memory.conversations import (
     ConversationSummary,
     StoredMessage,
     delete_conversation,
     list_conversations,
     load_conversation,
-    save_message,
+    save_turn,
     to_agent_messages,
 )
 from agentic_rag.memory.store import UserContext
+
+logger = logging.getLogger(__name__)
+
+ERROR_ANSWER = (
+    "Não consegui responder agora por uma falha interna. Tente de novo em instantes; "
+    "se o problema continuar, avise o time responsável pelo assistente."
+)
 
 st.set_page_config(page_title="Assistente Órbita", page_icon=":material/orbit:", layout="wide")
 
@@ -91,6 +107,20 @@ section[data-testid="stSidebar"] [class*="st-key-del-"] button:hover { color:#e5
     background: var(--card); border:1px solid var(--border); color: var(--accent);
     min-width:2.1rem; text-align:center; }
 .file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Lista de arquivos aguardando envio */
+.file-info { display:flex; flex-direction:column; min-width:0; gap:.05rem; }
+.file-status { font-size:.7rem; color: var(--muted); }
+.file-status.warn { color: var(--accent); }
+.file-status.bad { color:#e57373; }
+[class*="st-key-pending-"] { flex-wrap:nowrap; }
+[class*="st-key-pending-"] > div { min-width:0; }
+[class*="st-key-rm-"] { flex:0 0 auto; width:auto; }
+[class*="st-key-rm-"] button { width:1.9rem; height:1.9rem; min-height:0; padding:0;
+    justify-content:center; border-color: transparent; color: var(--muted); }
+[class*="st-key-rm-"] button:hover { color:#e57373; border-color: transparent;
+    background: rgba(229,115,115,.1); }
+[data-testid="stFileUploaderDropzone"] { background: var(--card);
+    border:1px dashed var(--border); border-radius:12px; }
 .side-meta { color: var(--muted); font-size:.75rem; line-height:1.6; padding-left:.2rem; }
 
 /* Botões */
@@ -142,6 +172,34 @@ section[data-testid="stSidebar"] [class*="st-key-del-"] button:hover { color:#e5
 .tool-chip { font-family: ui-monospace, Consolas, monospace; font-size:.78rem;
     color: var(--accent); }
 
+/* Ferramentas usadas: um bloco recolhível com a lista, e cada ferramenta recolhível dentro */
+.tools { display:inline-block; max-width:100%; margin:0 0 .7rem; font-size:.8rem; }
+.tools summary { list-style:none; cursor:pointer; user-select:none; }
+.tools summary::-webkit-details-marker { display:none; }
+.tools > summary { display:inline-flex; align-items:center; gap:.45rem; color: var(--muted);
+    padding:.28rem .75rem; border:1px solid var(--border); border-radius:999px;
+    background: var(--side); transition:.15s; }
+.tools > summary:hover, .tools[open] > summary { color: var(--accent);
+    border-color: rgba(216,180,90,.35); }
+.tools > summary b { color: var(--accent); font-weight:600; }
+.tools summary::before { content:"›"; display:inline-block; transition:transform .15s;
+    font-size:.95rem; line-height:1; }
+.tools details[open] > summary::before, .tools[open] > summary::before { transform:rotate(90deg); }
+.tools-list { margin-top:.4rem; width:min(560px, 100%); border:1px solid var(--border);
+    border-radius:10px; background: var(--side); padding:.25rem; }
+.tool-item > summary { display:flex; align-items:center; gap:.5rem; padding:.4rem .55rem;
+    border-radius:7px; color: var(--text); }
+.tool-item > summary:hover { background: var(--card); }
+.tool-item > summary::before { color: var(--muted); }
+.tool-name { font-family: ui-monospace, Consolas, monospace; color: var(--accent);
+    font-size:.78rem; flex:0 0 auto; }
+.tool-preview { color: var(--muted); overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; min-width:0; }
+.tool-args { margin:.15rem .4rem .45rem 1.4rem; padding:.55rem .7rem; max-height:180px;
+    overflow:auto; background: var(--bg); border:1px solid var(--border); border-radius:7px;
+    font-family: ui-monospace, Consolas, monospace; font-size:.74rem; color:#cfcfd5;
+    white-space:pre-wrap; word-break:break-word; }
+
 /* Input */
 [data-testid="stBottom"] > div { background: transparent; }
 [data-testid="stBottom"] [data-testid="stBottomBlockContainer"] { max-width:800px;
@@ -163,7 +221,7 @@ section[data-testid="stSidebar"] [class*="st-key-del-"] button:hover { color:#e5
 
 @st.cache_resource(show_spinner="Iniciando o agente…")
 def load_agent() -> tuple[Any, bool]:
-    """Cria o agente uma única vez por processo (mantém o InMemorySaver entre reruns)."""
+    """Cria o agente uma única vez por processo (reaproveita as conexões SQLite entre reruns)."""
     tracing = setup_langsmith()
     return get_agent(), tracing
 
@@ -284,9 +342,35 @@ def render_sidebar(tracing: bool) -> None:
         )
 
 
-@st.dialog("Base de conhecimento", icon=":material/database:", width="medium")
-def knowledge_dialog() -> None:
-    """Modal com os arquivos de data/raw e o botão para gerar os embeddings."""
+def _ext_badge(name: str) -> str:
+    return f'<span class="file-ext">{_esc(Path(name).suffix.lstrip(".").upper() or "—")}</span>'
+
+
+def _format_size(size: int) -> str:
+    return f"{size / 1024:.0f} KB" if size < 1024 * 1024 else f"{size / 1024 / 1024:.1f} MB"
+
+
+def _ingest() -> tuple[str, str]:
+    """Roda a ingestão e devolve (tipo, mensagem) para mostrar no modal."""
+    try:
+        result = run_ingestion()
+    except Exception as exc:  # noqa: BLE001 - mostrar qualquer falha ao usuário
+        logger.exception("Falha na ingestão")
+        return "error", f"Falha na ingestão: {exc}"
+    return "success", (
+        f"{result.total} chunks na base: {result.added} novo(s) ou alterado(s), "
+        f"{result.deleted} removido(s)."
+    )
+
+
+def _show_feedback(key: str) -> None:
+    """Mostra (uma vez) as mensagens guardadas antes do último rerun do modal."""
+    for kind, text in st.session_state.pop(key, []):
+        getattr(st, kind)(text)
+
+
+def render_knowledge_tab() -> None:
+    """Aba com os arquivos de data/raw e o botão para gerar os embeddings."""
     files = list_data_files()
     st.markdown(
         '<div class="dialog-hint">Arquivos de <code>data/raw</code> indexados no Astra DB. '
@@ -295,8 +379,7 @@ def knowledge_dialog() -> None:
     )
     if files:
         rows = "".join(
-            f'<div class="file-row"><span class="file-ext">'
-            f"{p.suffix.lstrip('.').upper() or '—'}</span>"
+            f'<div class="file-row">{_ext_badge(p.name)}'
             f'<span class="file-name">{_esc(p.name)}</span></div>'
             for p in files
         )
@@ -309,11 +392,150 @@ def knowledge_dialog() -> None:
         "Gerar embeddings", type="primary", disabled=not files, icon=":material/database:"
     ):
         with st.spinner(f"Indexando {len(files)} arquivo(s)…"):
+            kind, text = _ingest()
+        getattr(st, kind)(text)
+
+
+# Arquivos adicionados e ainda não enviados: {nome: (conteúdo, validação)}. Ficam no
+# session_state (e não no file_uploader) para a lista ter remoção e status por arquivo.
+PendingUploads = dict[str, tuple[bytes, UploadCheck]]
+
+
+def _pending_uploads() -> PendingUploads:
+    if "pending_uploads" not in st.session_state:
+        st.session_state.pending_uploads = {}
+    pending: PendingUploads = st.session_state.pending_uploads
+    return pending
+
+
+def _uploader_key() -> str:
+    return f"uploader-{st.session_state.get('uploader_version', 0)}"
+
+
+def _on_files_added() -> None:
+    """Move os arquivos do uploader para a lista de pendentes e esvazia o uploader."""
+    pending = _pending_uploads()
+    for file in st.session_state.get(_uploader_key()) or []:
+        data = file.getvalue()
+        check = check_upload(file.name, data)
+        pending[check.name or file.name] = (data, check)  # mesmo nome: o último vale
+    # Chave nova = uploader vazio, pronto para receber mais arquivos
+    st.session_state.uploader_version = st.session_state.get("uploader_version", 0) + 1
+
+
+def _remove_pending(name: str) -> None:
+    _pending_uploads().pop(name, None)
+
+
+def _upload_status(check: UploadCheck) -> str:
+    if not check.ok:
+        return f'<span class="file-status bad">Recusado: {_esc(check.error or "")}</span>'
+    if check.injection_signals:
+        return (
+            '<span class="file-status warn">Contém texto com cara de instrução; '
+            "o agente vai tratá-lo só como dado</span>"
+        )
+    if check.replaces:
+        return '<span class="file-status warn">Substitui o arquivo existente</span>'
+    return '<span class="file-status">Pronto para enviar</span>'
+
+
+def _send_pending() -> None:
+    """Salva os arquivos válidos em data/raw e indexa a base."""
+    pending = _pending_uploads()
+    feedback: list[tuple[str, str]] = []
+    saved: list[str] = []
+    with st.spinner("Salvando e indexando…"):
+        for name in [n for n, (_, check) in pending.items() if check.ok]:
+            data, _ = pending[name]
             try:
-                total = run_ingestion()
-                st.success(f"{total} chunks indexados.")
-            except Exception as exc:  # noqa: BLE001 - mostrar qualquer falha ao usuário
-                st.error(f"Falha na ingestão: {exc}")
+                save_upload(name, data)
+            except (ValueError, OSError) as exc:
+                logger.exception("Falha ao salvar %s", name)
+                feedback.append(("error", f"Não foi possível salvar {name}: {exc}"))
+                continue
+            saved.append(name)
+            del pending[name]
+        if saved:
+            feedback.append(("success", f"{len(saved)} arquivo(s) salvo(s) em data/raw."))
+            kind, text = _ingest()
+            if kind == "error":
+                text += " Os arquivos foram salvos: tente de novo em Gerar embeddings."
+            feedback.append((kind, text))
+    st.session_state.upload_feedback = feedback
+
+
+def render_upload_tab() -> None:
+    """Aba para adicionar documentos novos: escolhe, revisa a lista e envia."""
+    _show_feedback("upload_feedback")
+    settings = get_settings()
+    extensions = sorted(ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS)
+    st.markdown(
+        '<div class="dialog-hint">Os arquivos ficam na lista abaixo até você enviar. Ao '
+        "enviar, eles são salvos em <code>data/raw</code> e a base é indexada de novo. "
+        f"Formatos: {', '.join(extensions).upper()}; até {settings.upload_max_mb} MB cada."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.file_uploader(
+        "Adicionar arquivos",
+        type=extensions,
+        accept_multiple_files=True,
+        key=_uploader_key(),
+        on_change=_on_files_added,
+        label_visibility="collapsed",
+    )
+
+    pending = _pending_uploads()
+    if not pending:
+        st.caption("Nenhum arquivo aguardando envio.")
+        return
+
+    st.markdown('<div class="side-label">Aguardando envio</div>', unsafe_allow_html=True)
+    for index, (name, (_, check)) in enumerate(pending.items()):
+        with st.container(
+            key=f"pending-{index}", horizontal=True, vertical_alignment="center", gap=None
+        ):
+            st.markdown(
+                f'<div class="file-row">{_ext_badge(name)}<div class="file-info">'
+                f'<span class="file-name">{_esc(name)} · {_format_size(check.size)}</span>'
+                f"{_upload_status(check)}</div></div>",
+                unsafe_allow_html=True,
+                width="stretch",
+            )
+            st.button(
+                "",
+                key=f"rm-{index}",
+                icon=":material/close:",
+                help="Tirar da lista",
+                on_click=_remove_pending,
+                args=(name,),
+            )
+
+    valid = sum(check.ok for _, check in pending.values())
+    if valid < len(pending):
+        st.caption(
+            "Arquivos recusados não são enviados: tire-os da lista ou corrija e adicione de novo."
+        )
+    if st.button(
+        f"Enviar {valid} arquivo(s)",
+        type="primary",
+        disabled=not valid,
+        icon=":material/upload:",
+        key="send-uploads",
+    ):
+        _send_pending()
+        st.rerun(scope="fragment")  # atualiza as duas abas sem fechar o modal
+
+
+@st.dialog("Configurações", icon=":material/settings:", width="medium")
+def settings_dialog() -> None:
+    """Modal da engrenagem: base de conhecimento e upload de documentos novos."""
+    knowledge_tab, upload_tab = st.tabs(["Base de conhecimento", "Adicionar arquivos"])
+    with knowledge_tab:
+        render_knowledge_tab()
+    with upload_tab:
+        render_upload_tab()
 
 
 def render_topbar() -> None:
@@ -322,15 +544,48 @@ def render_topbar() -> None:
         "</span></div>",
         unsafe_allow_html=True,
     )
-    if st.button("", key="settings", icon=":material/settings:", help="Base de conhecimento"):
-        knowledge_dialog()
+    if st.button("", key="settings", icon=":material/settings:", help="Configurações"):
+        settings_dialog()
+
+
+def _html_text(text: str) -> str:
+    """Escapa para HTML dentro do st.markdown: sem quebra de linha (uma linha em branco
+    encerraria o bloco HTML) e sem `$` (o Streamlit leria como fórmula LaTeX)."""
+    return _esc(text).replace("\n", "&#10;").replace("$", "&#36;")
+
+
+def _args_preview(args: dict[str, Any]) -> str:
+    """Resumo de uma linha dos argumentos (ex.: a query), mostrado ao lado do nome."""
+    return " · ".join(str(v) for v in args.values())
+
+
+def tools_html(tools: list[dict[str, Any]]) -> str:
+    """Bloco recolhível "N ferramentas usadas"; dentro, cada ferramenta abre os argumentos.
+
+    Usa <details> em vez de st.expander porque o Streamlit não permite expander aninhado,
+    e assim abrir e fechar não causa rerun.
+    """
+    items = "".join(
+        '<details class="tool-item"><summary>'
+        f'<span class="tool-name">{_html_text(call["name"])}</span>'
+        f'<span class="tool-preview">{_html_text(_args_preview(call["args"]))}</span>'
+        "</summary>"
+        f'<pre class="tool-args">'
+        f"{_html_text(json.dumps(call['args'], ensure_ascii=False, indent=2))}</pre>"
+        "</details>"
+        for call in tools
+    )
+    label = "ferramenta usada" if len(tools) == 1 else "ferramentas usadas"
+    return (
+        f'<details class="tools"><summary><b>{len(tools)}</b> {label}</summary>'
+        f'<div class="tools-list">{items}</div></details>'
+    )
 
 
 def render_message(msg: dict[str, Any]) -> None:
     with st.chat_message(msg["role"]):
-        for call in msg.get("tools", []):
-            with st.expander(call["name"], expanded=False):
-                st.json(call["args"])
+        if tools := msg.get("tools"):
+            st.markdown(tools_html(tools), unsafe_allow_html=True)
         st.markdown(msg["content"])
 
 
@@ -350,10 +605,18 @@ def run_agent(question: str) -> None:
         "tags": ["streamlit", "memoria-sqlite"],
     }
 
-    # O InMemorySaver some ao reiniciar: numa conversa reaberta, reconstrói o contexto do SQLite
+    # Estado antes do turno: usado para desfazê-lo se falhar no meio
+    before = agent.get_state(config)
+
+    # Conversa sem checkpoint (ex.: gravada antes do checkpointer em SQLite): reconstrói o
+    # contexto a partir do histórico, ignorando turnos que falharam
     history: list[Any] = []
-    if not agent.get_state(config).values:
-        stored = [StoredMessage(m["role"], m["content"]) for m in st.session_state.messages[:-1]]
+    if not before.values:
+        stored = [
+            StoredMessage(m["role"], m["content"])
+            for m in st.session_state.messages[:-1]
+            if not m.get("error")
+        ]
         history = to_agent_messages(stored)
 
     tools: list[dict[str, Any]] = []
@@ -362,30 +625,51 @@ def run_agent(question: str) -> None:
     with st.chat_message("assistant"):
         status = st.status("Pensando…", expanded=False)
         placeholder = st.empty()
+        streamed = ""  # texto da resposta chegando token a token
         try:
-            for update in agent.stream(
+            # "messages" entrega os tokens do LLM conforme são gerados (efeito de digitação);
+            # "updates" entrega cada passo completo (chamadas de tool e a resposta final)
+            for mode, data in agent.stream(
                 {"messages": [*history, HumanMessage(question)]},
                 config,
                 context=context,
-                stream_mode="updates",
+                stream_mode=["messages", "updates"],
             ):
-                for node, step in update.items():
-                    # Só o nó "model" traz mensagens novas do LLM. O resumo
-                    # (SummarizationMiddleware) devolve as mensagens antigas preservadas,
-                    # que seriam mostradas de novo como se fossem chamadas deste turno.
-                    if node != "model" or not isinstance(step, dict):
+                if mode == "messages":
+                    chunk, meta = data
+                    # Só tokens do nó "model": o resumo (SummarizationMiddleware) também
+                    # chama o LLM, e o texto dele não é a resposta ao colaborador
+                    if (
+                        meta.get("langgraph_node") == "model"
+                        and isinstance(chunk, AIMessageChunk)
+                        and (text := chunk.text)
+                    ):
+                        streamed += text
+                        placeholder.markdown(streamed + "▌")
+                    continue
+
+                for node, step in data.items():
+                    # Só o nó "model" (LLM) e o guardrail de prompt (resposta fixa, sem
+                    # LLM) trazem mensagens novas. O resumo (SummarizationMiddleware)
+                    # devolve as mensagens antigas preservadas, que seriam mostradas de
+                    # novo como se fossem deste turno.
+                    if node not in ("model", PROMPT_PROTECTION_NODE) or not isinstance(step, dict):
                         continue
                     for message in step.get("messages", []):
                         if isinstance(message, AIMessage) and message.tool_calls:
+                            # Texto que veio antes de uma chamada de tool não é a resposta
+                            streamed = ""
+                            placeholder.empty()
                             for call in message.tool_calls:
                                 tools.append({"name": call["name"], "args": call["args"]})
                                 status.update(label=f"Usando {call['name']}…")
+                                # Ao vivo, só o nome; os argumentos ficam no bloco
+                                # recolhível que aparece com a resposta (render_message)
                                 with status:
                                     st.markdown(
-                                        f'<span class="tool-chip">{call["name"]}</span>',
+                                        f'<span class="tool-chip">{_esc(call["name"])}</span>',
                                         unsafe_allow_html=True,
                                     )
-                                    st.json(call["args"])
                         elif isinstance(message, ToolMessage):
                             continue
                         elif isinstance(message, AIMessage):
@@ -395,15 +679,26 @@ def run_agent(question: str) -> None:
                 label=f"{len(tools)} ferramenta(s) usada(s)" if tools else "Resposta pronta",
                 state="complete",
             )
-        except Exception as exc:  # noqa: BLE001 - mostrar qualquer falha ao usuário
+        except Exception:  # noqa: BLE001 - qualquer falha vira mensagem amigável ao usuário
+            # Detalhes técnicos só no log (e no trace do LangSmith), não na tela
+            logger.exception("Falha ao executar o agente (thread %s)", thread_id)
             failed = True
             status.update(label="Erro", state="error")
-            answer = f"Não consegui responder: `{exc}`"
+            answer = ERROR_ANSWER
             placeholder.markdown(answer)
+            try:
+                rollback_turn(agent, config, before)
+            except Exception:  # noqa: BLE001 - o turno já falhou; só registra
+                logger.exception("Falha ao desfazer o turno (thread %s)", thread_id)
+
+    if failed:
+        # O turno com falha fica só na tela: não vai para o histórico nem para o contexto
+        st.session_state.messages[-1]["error"] = True
+        st.session_state.messages.append({"role": "assistant", "content": answer, "error": True})
+        return
 
     st.session_state.messages.append({"role": "assistant", "content": answer, "tools": tools})
-    if not failed:
-        save_message(context.user_id, thread_id, "assistant", answer, tools)
+    save_turn(context.user_id, thread_id, question, answer, tools)
 
 
 def main() -> None:
@@ -433,8 +728,8 @@ def main() -> None:
     typed = st.chat_input("Pergunte alguma coisa...")
     question = typed or pending
     if question:
+        # Pergunta e resposta são gravadas juntas no SQLite ao final do turno (save_turn)
         st.session_state.messages.append({"role": "user", "content": question})
-        save_message(get_settings().user_id, st.session_state.thread_id, "user", question)
         render_message(st.session_state.messages[-1])
         run_agent(question)
         st.rerun()

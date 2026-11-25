@@ -7,12 +7,11 @@ __pycache__/
 *.egg-info/
 
 # Caches das ferramentas
-.pytest_cache/
 .ruff_cache/
 .mypy_cache/
 
 # Dados gerados localmente
 storage/
 
-CLAUDE.md
+#Arquivo pessoal
 explicacao.md

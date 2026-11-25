@@ -55,7 +55,7 @@ class TracedOpenAIEmbeddings(OpenAIEmbeddings):
 
 
 def get_chat_model() -> ChatOpenAI:
-    """Cria o modelo de chat configurano no Settings"""
+    """Cria o modelo de chat configurado no Settings"""
     settings = get_settings()
     return ChatOpenAI(
         model=settings.llm_model,
