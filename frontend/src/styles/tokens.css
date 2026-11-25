@@ -1,0 +1,18 @@
+:root {
+  --bg: #0a0a0b;
+  --side: #111112;
+  --card: #1c1c1e;
+  --card-2: #232326;
+  --border: #262629;
+  --text: #ececee;
+  --muted: #8b8b93;
+  --accent: #d8b45a;
+  --accent-soft: rgba(216, 180, 90, 0.12);
+  --accent-line: rgba(216, 180, 90, 0.3);
+  --danger: #e57373;
+  --danger-soft: rgba(229, 115, 115, 0.1);
+  --ok: #7fc69a;
+  --mono: ui-monospace, Consolas, 'SF Mono', monospace;
+  --sidebar-w: 280px;
+  color-scheme: dark;
+}

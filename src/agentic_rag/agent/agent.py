@@ -88,7 +88,7 @@ def get_agent() -> Agent:
         context_schema=UserContext,
         checkpointer=get_checkpointer(),
         store=get_memory_store(),
-        name="orbita_agent",  # nome do trace no LangSmith (padrão seria "LangGraph")
+        name="vega_agent",  # nome do trace no LangSmith (padrão seria "LangGraph")
     )
 
 

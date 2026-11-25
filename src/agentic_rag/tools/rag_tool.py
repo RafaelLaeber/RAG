@@ -1,4 +1,4 @@
-"""Tool de RAG: busca nas políticas e documentos internos da Órbita"""
+"""Tool de RAG: busca nas políticas e documentos internos da empresa"""
 
 from functools import lru_cache
 
@@ -25,7 +25,7 @@ def _format_docs(docs: list[Document]) -> str:
 
 @tool
 def search_policies(query: str) -> str:
-    """Busca nas políticas e documentos internos da Órbita (reembolso, manual do colaborador, FAQ).
+    """Busca nas políticas e documentos internos da empresa (reembolso, manual do colaborador, FAQ).
 
     Use para qualquer pergunta sobre regras, limites, prazos ou procedimentos da empresa.
 

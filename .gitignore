@@ -15,3 +15,6 @@ storage/
 
 #Arquivo pessoal
 explicacao.md
+# Frontend
+frontend/node_modules/
+frontend/dist/

@@ -127,6 +127,25 @@ def list_conversations(user_id: str) -> list[ConversationSummary]:
     return [ConversationSummary(r[0], r[1], datetime.fromisoformat(r[2])) for r in rows]
 
 
+def get_conversation(user_id: str, conversation_id: str) -> ConversationSummary | None:
+    """Dados da conversa (None se não existir ou for de outro usuário)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, title, updated_at FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        ).fetchone()
+    return ConversationSummary(row[0], row[1], datetime.fromisoformat(row[2])) if row else None
+
+
+def conversation_owner(conversation_id: str) -> str | None:
+    """Dono da conversa (None se ela ainda não existe). Serve para barrar ids de outro usuário."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+    return str(row[0]) if row else None
+
+
 def load_conversation(user_id: str, conversation_id: str) -> list[StoredMessage]:
     """Histórico completo de uma conversa (vazio se não existir ou for de outro usuário)."""
     with _connect() as conn:

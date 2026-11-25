@@ -43,7 +43,6 @@ class Settings(BaseSettings):
     memory_db_path: Path = Path("storage/memory.sqlite")
     memory_max_items: int = Field(default=50, gt=0)  # fatos por colaborador
     memory_max_chars: int = Field(default=200, gt=0)  # tamanho máximo de cada fato
-    user_id: str = "Rafael"
 
     # Memória de curto prazo (checkpoints do LangGraph em SQLite, sobrevive a reinícios)
     checkpoints_db_path: Path = Path("storage/checkpoints.sqlite")
@@ -59,9 +58,21 @@ class Settings(BaseSettings):
     conversations_db_path: Path = Path("storage/conversations.sqlite")
     conversations_max_items: int = Field(default=30, gt=0)
 
+    # Usuários e sessões (SQLite local). O cookie só deve ser Secure atrás de HTTPS.
+    users_db_path: Path = Path("storage/users.sqlite")
+    session_ttl_hours: int = Field(default=168, gt=0)
+    session_cookie_secure: bool = False
+
+    # Limite de tentativas de login: falhas dentro da janela bloqueiam novas tentativas
+    # até a falha mais antiga sair dela. Por e-mail (força bruta numa conta) e por IP
+    # (uma senha testada em vários e-mails)
+    login_max_attempts: int = Field(default=5, gt=0)  # por e-mail
+    login_max_attempts_per_ip: int = Field(default=20, gt=0)
+    login_window_minutes: int = Field(default=15, gt=0)
+
     # LangSmith (opcional: sem chave, o tracing fica desligado)
     langsmith_api_key: SecretStr | None = None
-    langsmith_project: str = "orbita-agent"
+    langsmith_project: str = "vega-agent"
 
     @model_validator(mode="after")
     def _check_summary_limits(self) -> Self:

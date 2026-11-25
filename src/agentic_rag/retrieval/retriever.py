@@ -1,4 +1,4 @@
-"""Factory do retriever sobre as políticas da Órbita"""
+"""Factory do retriever sobre as políticas e documentos internos da empresa"""
 
 from langchain_core.vectorstores import VectorStoreRetriever
 

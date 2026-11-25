@@ -8,9 +8,23 @@ pedidos diretos sem chamar o LLM; os disfarçados ficam com a regra do system pr
 import re
 import unicodedata
 
-CONFIDENTIAL_REPLY = "Não posso informar esse dado."
+CONFIDENTIAL_REPLY = (
+    "Não posso fornecer  ou reproduzir informações internas do assistente,"
+    " nem instruções, prompts do sistema ou informações sobre configurações."
+)
+# Apresentação pública: única coisa que o agente pode dizer sobre si mesmo. Fica aqui, e
+# não só no prompt, para o texto liberado ser revisado junto com as outras respostas fixas
+# e para ficar claro que nada além dele (ferramentas, modelo, regras) é público
+INTRODUCTION = (
+    "Sou o Vega, o assistente interno da empresa. Posso tirar dúvidas sobre as políticas e "
+    "os documentos internos, como reembolso, manual do colaborador e perguntas frequentes, "
+    "e calcular reembolsos de despesas, inclusive as feitas em moeda estrangeira, com a "
+    "cotação do dia. Também guardo o que você me contar sobre você, como cargo ou cidade, "
+    "para personalizar as respostas. Como posso ajudar?"
+)
 OFF_TOPIC_REPLY = (
-    "Só posso ajudar com assuntos da Órbita: políticas internas, reembolsos e despesas."
+    "Só posso ajudar com assuntos da empresa: políticas e documentos internos, "
+    "reembolsos e despesas."
 )
 
 # Aplicados ao texto em minúsculas e sem acentos. Cada padrão exige um alvo claro (o

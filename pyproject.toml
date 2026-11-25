@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentic-rag"
-version = "0.1.0"
+version = "1.0.0"
 description = "Agente RAG com memória usando LangChain, LangSmith, OpenAI e Astra DB"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,11 @@ dependencies = [
     "pydantic-settings>=2.16",
     "pypdf>=6.0",
     "pyyaml>=6.0",
-    "streamlit>=1.40",
+    "fastapi>=0.165.0",
+    "uvicorn[standard]>=0.54.0",
+    "python-multipart>=0.0.34",
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.4.0",
 ]
 
 
