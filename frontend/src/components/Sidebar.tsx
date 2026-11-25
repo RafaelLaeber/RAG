@@ -17,7 +17,6 @@ type Props = {
 
 export default function Sidebar({
   user,
-  meta,
   conversations,
   activeId,
   busy,

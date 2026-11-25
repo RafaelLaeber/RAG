@@ -121,6 +121,14 @@ def update_user_memory(store: SqliteStore, user_id: str, memory_id: str, content
     return True
 
 
+def delete_all_user_memories(store: SqliteStore, user_id: str) -> int:
+    """Apaga todos os fatos do usuário (usado ao excluir a conta). Devolve quantos apagou."""
+    items = _all_items(store, user_id)
+    for item in items:
+        store.delete(_namespace(user_id), item.key)
+    return len(items)
+
+
 def delete_user_memory(store: SqliteStore, user_id: str, memory_id: str) -> bool:
     """Apaga um fato do usuário.
 

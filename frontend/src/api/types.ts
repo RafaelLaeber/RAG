@@ -1,4 +1,13 @@
 export type User = { id: string; name: string; email: string; is_admin: boolean }
+export type AuthResponse = {
+  user: User
+  access_token: string
+  token_type: 'bearer'
+  expires_in: number
+}
+export type UserCreate = { name: string; email: string; password: string; is_admin: boolean }
+/** Campos omitidos ficam como estão. */
+export type UserUpdate = Partial<UserCreate>
 export type ConversationSummary = { id: string; title: string; updated_at: string }
 export type ToolCall = { name: string; args: Record<string, unknown> }
 export type Message = { role: 'user' | 'assistant'; content: string; tools: ToolCall[] }

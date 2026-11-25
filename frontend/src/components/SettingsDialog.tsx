@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { api, ApiError } from '../api/client'
 import type { DataFile, IngestionResult, Meta, UploadCheck, UploadResult } from '../api/types'
-import { UploadIcon, CloseIcon } from './Icons'
+import { UploadIcon, CloseIcon, TrashIcon } from './Icons'
 import Modal from './Modal'
+import UsersTab from './UsersTab'
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Algo deu errado. Tente de novo.'
 }
+
+// Acima disso a lista ganha rolagem (a altura máxima está em .file-list.scroll)
+const MAX_VISIBLE_FILES = 6
 
 function extOf(name: string): string {
   const i = name.lastIndexOf('.')
@@ -40,6 +44,8 @@ function KnowledgeTab({ onChanged, version }: { onChanged: () => void; version: 
   const [files, setFiles] = useState<DataFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [target, setTarget] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback[]>([])
 
   useEffect(() => {
@@ -67,6 +73,36 @@ function KnowledgeTab({ onChanged, version }: { onChanged: () => void; version: 
     }
   }
 
+  async function deleteOne(name: string) {
+    setBusy(true)
+    setFeedback([])
+    try {
+      await api.deleteDocument(name)
+      setFeedback([{ kind: 'success', text: `${name} apagado.` }])
+      onChanged()
+    } catch (e) {
+      setFeedback([{ kind: 'error', text: `Falha ao apagar: ${errorMessage(e)}` }])
+    } finally {
+      setBusy(false)
+      setTarget(null)
+    }
+  }
+
+  async function clearAll() {
+    setBusy(true)
+    setFeedback([])
+    try {
+      const r = await api.clearDocuments()
+      setFeedback([{ kind: 'success', text: `${r.removed} arquivo(s) apagado(s) e base vetorial limpa.` }])
+      onChanged()
+    } catch (e) {
+      setFeedback([{ kind: 'error', text: `Falha ao apagar: ${errorMessage(e)}` }])
+    } finally {
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+
   return (
     <div>
       <p className="dialog-hint">
@@ -79,12 +115,21 @@ function KnowledgeTab({ onChanged, version }: { onChanged: () => void; version: 
         </div>
       )}
       {files && files.length === 0 && <p className="side-empty">Nenhum arquivo em data/raw.</p>}
-      <ul className="file-list">
+      <ul className={`file-list${files && files.length > MAX_VISIBLE_FILES ? ' scroll' : ''}`}>
         {files?.map((f) => (
           <li className="file-row" key={f.name}>
             <span className="file-ext">{extOf(f.name)}</span>
             <span className="file-name">{f.name}</span>
             <span className="file-size">{formatSize(f.size)}</span>
+            <button
+              className="icon-btn file-del"
+              type="button"
+              aria-label={`Apagar ${f.name}`}
+              disabled={busy}
+              onClick={() => setTarget(f.name)}
+            >
+              <TrashIcon />
+            </button>
           </li>
         ))}
       </ul>
@@ -95,10 +140,55 @@ function KnowledgeTab({ onChanged, version }: { onChanged: () => void; version: 
           onClick={ingest}
           disabled={busy || !files || files.length === 0}
         >
-          {busy ? 'Indexando…' : 'Gerar embeddings'}
+          {busy && !confirming ? 'Indexando…' : 'Gerar embeddings'}
         </button>
+        {confirming ? (
+          <>
+            <button className="btn btn-danger" type="button" onClick={clearAll} disabled={busy}>
+              {busy ? 'Apagando…' : 'Confirmar: apagar tudo'}
+            </button>
+            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={busy}>
+              Cancelar
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn-danger"
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={busy || !files || files.length === 0}
+          >
+            Apagar todos os arquivos
+          </button>
+        )}
       </div>
+      {confirming && (
+        <div className="notice notice-error" role="alert">
+          Isso apaga todos os arquivos de data/raw e limpa a base vetorial. Não dá para desfazer.
+        </div>
+      )}
       <FeedbackList items={feedback} />
+      {target && (
+        <Modal title="Apagar documento?" size="small" onClose={() => !busy && setTarget(null)}>
+          <p className="dialog-hint">
+            O arquivo <b>{target}</b> e os trechos indexados dele serão apagados. Essa ação não pode
+            ser desfeita.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" type="button" onClick={() => setTarget(null)} disabled={busy}>
+              Cancelar
+            </button>
+            <button
+              className="btn btn-danger"
+              type="button"
+              onClick={() => deleteOne(target)}
+              disabled={busy}
+            >
+              {busy ? 'Apagando…' : 'Apagar'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -278,8 +368,10 @@ function UploadTab({ meta, onUploaded }: { meta: Meta | null; onUploaded: () => 
   )
 }
 
+type Tab = 'knowledge' | 'upload' | 'users'
+
 export default function SettingsDialog({ meta, onClose }: { meta: Meta | null; onClose: () => void }) {
-  const [tab, setTab] = useState<'knowledge' | 'upload'>('knowledge')
+  const [tab, setTab] = useState<Tab>('knowledge')
   const [version, setVersion] = useState(0)
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
 
@@ -308,13 +400,22 @@ export default function SettingsDialog({ meta, onClose }: { meta: Meta | null; o
         >
           Adicionar arquivos
         </button>
+        <button
+          role="tab"
+          type="button"
+          id="tab-users"
+          aria-selected={tab === 'users'}
+          aria-controls="panel-users"
+          className={tab === 'users' ? 'tab active' : 'tab'}
+          onClick={() => setTab('users')}
+        >
+          Gerenciar usuários
+        </button>
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'knowledge' ? (
-          <KnowledgeTab onChanged={refresh} version={version} />
-        ) : (
-          <UploadTab meta={meta} onUploaded={refresh} />
-        )}
+        {tab === 'knowledge' && <KnowledgeTab onChanged={refresh} version={version} />}
+        {tab === 'upload' && <UploadTab meta={meta} onUploaded={refresh} />}
+        {tab === 'users' && <UsersTab />}
       </div>
     </Modal>
   )

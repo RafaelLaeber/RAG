@@ -13,16 +13,28 @@ de uma empresa e calcula reembolsos de despesas no exterior com a cotação real
 
 ## Autenticação
 
-A sessão é um cookie `HttpOnly` (`vega_session`) criado no **registro** ou no **login**.
+Autenticação por **JWT** em dois tokens, criados no **registro** ou no **login**:
+
+- **acesso**: JWT (HS256) válido por `ACCESS_TOKEN_MINUTES` (15). Vai no corpo da resposta
+  (`access_token`) e no cookie `HttpOnly` `vega_access`. A API aceita o cookie ou o header
+  `Authorization: Bearer <token>`;
+- **refresh**: token opaco válido por `SESSION_TTL_HOURS` (7 dias), só no cookie `HttpOnly`
+  `vega_refresh`, enviado apenas a `/api/auth`. `POST /api/auth/refresh` troca ele por um JWT
+  novo.
+
+Logout, troca de senha e exclusão do usuário invalidam os JWT na hora: a API confere no banco
+que a sessão do token ainda existe.
+
 Para testar por aqui:
 
 1. Abra `POST /api/auth/register` (primeira vez) ou `POST /api/auth/login`, clique em
-   **Try it out** e envie. O navegador guarda o cookie.
-2. As demais rotas já funcionam nesta página, porque o cookie vai junto.
+   **Try it out** e envie. O navegador guarda os cookies, e as demais rotas já funcionam.
+   Outra opção: copie o `access_token` e cole em **Authorize → Bearer**.
+2. Depois de 15 minutos, chame `POST /api/auth/refresh` para renovar o JWT.
 3. `POST /api/auth/logout` encerra a sessão.
 
 O **primeiro usuário registrado vira administrador**. Só administradores acessam
-`/api/documents`.
+`/api/documents` e `/api/users`.
 
 ## Erros
 
@@ -46,11 +58,16 @@ TAGS: list[dict[str, Any]] = [
         "name": "documents",
         "description": "Base de conhecimento (`data/raw` e Astra DB). **Só administradores.**",
     },
+    {
+        "name": "users",
+        "description": "Gestão de contas: listar, criar, alterar e apagar. **Só administradores.**",
+    },
     {"name": "status", "description": "Saúde da API e configurações públicas."},
 ]
 
 _DEFAULT_ERRORS = {
-    401: "Sem sessão válida: faça login (cookie `vega_session` ausente ou expirado).",
+    401: "Sem JWT válido: ausente, inválido, expirado ou de uma sessão encerrada. "
+    "Renove em `POST /api/auth/refresh` ou faça login.",
     403: "Apenas administradores.",
     404: "Não encontrado.",
 }

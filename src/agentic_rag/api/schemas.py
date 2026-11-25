@@ -36,6 +36,24 @@ class UserOut(BaseModel):
     )
 
 
+class AuthOut(BaseModel):
+    """Login, registro ou renovação certos: o usuário e o JWT de acesso.
+
+    O mesmo JWT também vai no cookie `vega_access`, e o refresh token só no cookie
+    `vega_refresh` (`HttpOnly`, nunca no corpo).
+    """
+
+    user: UserOut
+    access_token: str = Field(
+        description="JWT de acesso (HS256). Use em `Authorization: Bearer <token>`.",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+    token_type: str = Field(default="bearer", description="Sempre `bearer`.")
+    expires_in: int = Field(
+        description="Validade do JWT em segundos (`ACCESS_TOKEN_MINUTES`).", examples=[900]
+    )
+
+
 class RegisterIn(BaseModel):
     """Dados para criar uma conta."""
 
@@ -79,6 +97,70 @@ class LoginIn(BaseModel):
         min_length=1, max_length=320, description="E-mail da conta (maiúsculas são ignoradas)."
     )
     password: str = Field(min_length=1, max_length=128, description="Senha da conta.")
+
+
+def _clean_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        raise ValueError("O nome não pode ficar vazio.")
+    return value
+
+
+# --- Usuários (admin) -----------------------------------------------------------------
+
+
+class UserCreateIn(BaseModel):
+    """Usuário criado por um administrador."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "João Lima",
+                    "email": "joao@empresa.com",
+                    "password": "senha-segura-123",
+                    "is_admin": False,
+                }
+            ]
+        }
+    )
+
+    name: str = Field(
+        min_length=1, max_length=80, description="Nome de exibição (1 a 80 caracteres)."
+    )
+    email: EmailStr = Field(description="E-mail válido. É normalizado em minúsculas.")
+    password: str = Field(min_length=8, max_length=128, description="Senha (8 a 128 caracteres).")
+    is_admin: bool = Field(default=False, description="Se o usuário é administrador.")
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        return _clean_name(value)
+
+
+class UserUpdateIn(BaseModel):
+    """Campos a alterar. Os omitidos (ou `null`) ficam como estão."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"email": "joao.lima@empresa.com", "is_admin": True}]}
+    )
+
+    name: str | None = Field(default=None, min_length=1, max_length=80, description="Novo nome.")
+    email: EmailStr | None = Field(default=None, description="Novo e-mail.")
+    password: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        description="Nova senha (8 a 128 caracteres). Encerra as sessões abertas do usuário.",
+    )
+    is_admin: bool | None = Field(default=None, description="Se o usuário é administrador.")
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        return _clean_name(value)
 
 
 # --- Status ---------------------------------------------------------------------------
@@ -230,6 +312,12 @@ class IngestionResultOut(BaseModel):
     deleted: int = Field(
         description="Chunks removidos (documentos editados ou apagados).", examples=[3]
     )
+
+
+class ClearResultOut(BaseModel):
+    """Resultado de apagar a base de conhecimento."""
+
+    removed: int = Field(description="Arquivos apagados de `data/raw`.", examples=[6])
 
 
 class UploadErrorOut(BaseModel):

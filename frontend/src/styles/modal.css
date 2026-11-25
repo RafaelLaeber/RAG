@@ -95,7 +95,39 @@
   padding: 0;
 }
 
+/* 6 linhas de 2.4rem; a partir do 7º arquivo a lista rola dentro da caixa */
+.file-list.scroll {
+  max-height: 14.4rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.file-del {
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  opacity: 0;
+}
+
+.file-row:hover .file-del,
+.file-del:focus-visible {
+  opacity: 1;
+}
+
+.file-del:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+@media (hover: none) {
+  .file-del {
+    opacity: 0.6;
+  }
+}
+
 .file-row {
+  min-height: 2.4rem;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -191,4 +223,83 @@
   border-color: var(--danger);
   background: var(--danger-soft);
   color: #f1b0b0;
+}
+
+/* --- Gerenciar usuários --- */
+
+/* Linhas de duas linhas (nome e e-mail): 6 de 2.9rem antes de rolar */
+.file-list.users .file-row {
+  min-height: 2.9rem;
+}
+
+.file-list.users.scroll {
+  max-height: 17.4rem;
+}
+
+.row-spacer {
+  width: 1.9rem;
+  flex: 0 0 auto;
+}
+
+.user-self {
+  color: var(--muted);
+}
+
+.user-badge {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+/* O lápis usa o hover dourado, não o vermelho da lixeira */
+.row-edit:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.check > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.check input {
+  margin-top: 0.15rem;
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+
+.check input:disabled,
+.check input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.7;
 }

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from agentic_rag.agent.agent import get_agent
 from agentic_rag.api.deps import CurrentUser
 from agentic_rag.api.docs import DESCRIPTION, TAGS, errors
-from agentic_rag.api.routers import auth, chat, conversations, documents
+from agentic_rag.api.routers import auth, chat, conversations, documents, users
 from agentic_rag.api.schemas import MetaOut
 from agentic_rag.config import get_settings, setup_langsmith
 from agentic_rag.ingestion.uploads import SUPPORTED_EXTENSIONS
@@ -74,7 +74,7 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Assistente Vega",
-        version="1.0.0",
+        version="2.0.0",
         description=DESCRIPTION,
         openapi_tags=TAGS,
         swagger_ui_parameters={"defaultModelsExpandDepth": 0},  # esconde os schemas no fim
@@ -88,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(chat.router)
     app.include_router(documents.router)
+    app.include_router(users.router)
     if (FRONTEND_DIST / "index.html").is_file():
         _mount_frontend(app, FRONTEND_DIST)
     return app

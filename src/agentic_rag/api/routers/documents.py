@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from agentic_rag.api.deps import AdminUser
 from agentic_rag.api.docs import errors
 from agentic_rag.api.schemas import (
+    ClearResultOut,
     DataFileOut,
     IngestionResultOut,
     UploadCheckOut,
@@ -15,7 +16,7 @@ from agentic_rag.api.schemas import (
     UploadResultOut,
 )
 from agentic_rag.config import get_settings
-from agentic_rag.ingestion.pipeline import run_ingestion
+from agentic_rag.ingestion.pipeline import clear_knowledge_base, delete_document, run_ingestion
 from agentic_rag.ingestion.uploads import check_upload, save_upload
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,51 @@ def list_files(_admin: AdminUser) -> list[DataFileOut]:
         for p in sorted(data_dir.iterdir())
         if p.is_file() and not p.name.startswith(".")
     ]
+
+
+@router.delete(
+    "",
+    summary="Apagar todos os documentos",
+    response_description="Quantos arquivos foram apagados de `data/raw`.",
+    responses=errors((502, "Não foi possível limpar a base (Astra DB indisponível).")),
+)
+def clear(_admin: AdminUser) -> ClearResultOut:
+    """Apaga **todos** os arquivos de `data/raw` e todos os chunks da base vetorial.
+
+    Sem volta: depois disso o agente não encontra nada nos documentos até que novos
+    arquivos sejam enviados.
+    """
+    try:
+        return ClearResultOut(removed=clear_knowledge_base())
+    except Exception:
+        logger.exception("Falha ao apagar a base de conhecimento")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Não foi possível apagar a base. Verifique o Astra DB e tente de novo.",
+        ) from None
+
+
+@router.delete(
+    "/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Apagar um documento",
+    responses=errors(
+        (404, "Não existe arquivo com esse nome em `data/raw`."),
+        (502, "Não foi possível limpar a base (Astra DB indisponível)."),
+    ),
+)
+def delete_one(name: str, _admin: AdminUser) -> None:
+    """Apaga um arquivo de `data/raw` e os chunks dele na base vetorial."""
+    try:
+        found = delete_document(name)
+    except Exception:
+        logger.exception("Falha ao apagar o documento %s", name)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Não foi possível apagar o documento. Verifique o Astra DB e tente de novo.",
+        ) from None
+    if not found:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado.")
 
 
 @router.post(

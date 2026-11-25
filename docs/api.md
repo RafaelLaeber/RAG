@@ -54,10 +54,25 @@ type IngestionResult = { total: number; added: number; deleted: number };
 
 | Método | Rota | Auth | Corpo | Resposta |
 |---|---|---|---|---|
-| POST | `/register` | não | `{"name": str, "email": str, "password": str}` | `201` `User` + cookie |
-| POST | `/login` | não | `{"email": str, "password": str}` | `200` `User` + cookie |
-| POST | `/logout` | sim | | `204`, apaga a sessão e o cookie |
+| POST | `/register` | não | `{"name": str, "email": str, "password": str}` | `201` `Auth` + cookies |
+| POST | `/login` | não | `{"email": str, "password": str}` | `200` `Auth` + cookies |
+| POST | `/refresh` | cookie `vega_refresh` | | `200` `Auth` + cookie `vega_access` novo; `401` se a sessão acabou |
+| POST | `/logout` | não | | `204`, apaga a sessão e os cookies |
 | GET | `/me` | sim | | `User` |
+
+`Auth` = `{"user": User, "access_token": str, "token_type": "bearer", "expires_in": int}`.
+
+**Tokens:**
+- **Acesso**: JWT HS256 com `sub` (id do usuário), `sid` (id da sessão), `typ: "access"`,
+  `iss: "vega"`, `iat` e `exp`. Vale `ACCESS_TOKEN_MINUTES` (padrão 15). Vai no corpo e no
+  cookie `vega_access` (`HttpOnly`, `SameSite=Lax`, `Path=/`). Rotas com "Auth: sim" aceitam
+  esse cookie ou o header `Authorization: Bearer <token>`.
+- **Refresh**: token opaco que vale `SESSION_TTL_HOURS` (padrão 168), só no cookie
+  `vega_refresh` (`HttpOnly`, `SameSite=Lax`, `Path=/api/auth`). O banco guarda só o SHA-256.
+- Um JWT só vale enquanto a sessão (`sid`) existir: logout, troca de senha e exclusão do
+  usuário o invalidam na hora. O papel (`is_admin`) é lido do banco a cada requisição.
+- JWT ausente, inválido ou vencido: `401` com `WWW-Authenticate: Bearer`. O frontend chama
+  `/refresh` uma vez e repete a requisição; se o refresh também falhar, vai para o login.
 
 - `name`: 1 a 80 caracteres após `strip`. `email`: válido, normalizado em minúsculas.
   `password`: 8 a 128 caracteres.
@@ -115,9 +130,24 @@ Regras do backend (as mesmas do Streamlit antigo):
 | Método | Rota | Corpo | Resposta |
 |---|---|---|---|
 | GET | `/` | | `DataFile[]` (arquivos de `data/raw`, por nome) |
+| DELETE | `/` | | `{"removed": int}`: apaga todos os arquivos de `data/raw` e todos os chunks do Astra; falha do Astra responde `502` (nada é apagado) |
+| DELETE | `/{name}` | | `204`; apaga um arquivo de `data/raw` e os chunks dele no Astra. `404` se não existir, `502` se o Astra falhar (nada é apagado) |
 | POST | `/check` | `multipart/form-data`, campo `files` (um ou mais) | `UploadCheck[]`, sem gravar nada |
 | POST | `/` | `multipart/form-data`, campo `files` | `{"saved": str[], "errors": [{"name": str, "message": str}], "ingestion": IngestionResult \| null, "ingestion_error": str \| null}` |
 | POST | `/ingest` | | `IngestionResult`; falha da ingestão responde `502` com `detail` |
 
 - Arquivo acima de `UPLOAD_MAX_MB`: recusado em `UploadCheck.error` (não derruba a requisição).
 - `POST /` só grava os válidos e roda a ingestão se gravou pelo menos um.
+
+### Usuários (`/api/users`, só admin)
+
+| Método | Rota | Corpo | Resposta |
+|---|---|---|---|
+| GET | `/` | | `User[]`, por nome |
+| POST | `/` | `{"name": str, "email": str, "password": str, "is_admin": bool}` (`is_admin` opcional, padrão `false`) | `201` + `User`; `409` se o e-mail já existir. Não abre sessão |
+| PATCH | `/{id}` | qualquer subconjunto de `{"name", "email", "password", "is_admin"}` (omitido = não muda) | `User`; `404` se não existir, `409` se o e-mail já for de outra conta ou se a mudança deixaria o sistema sem admin |
+| DELETE | `/{id}` | | `204`; apaga a conta, sessões, conversas, checkpoints e memórias do usuário. `404` se não existir, `409` para a própria conta ou o último admin |
+
+- Mesmas validações do registro: nome de 1 a 80 caracteres, e-mail válido, senha de 8 a 128.
+- Trocar a senha encerra as sessões abertas do usuário. Se for a própria conta, a sessão atual continua.
+- Ninguém tira o próprio acesso de administrador (`409`) nem apaga a própria conta.

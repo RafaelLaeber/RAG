@@ -1,7 +1,8 @@
 """Usuários, sessões e tentativas de login em SQLite (storage/users.sqlite).
 
-Senhas ficam só como hash argon2 e sessões só como hash SHA-256 do token: um vazamento do
-banco não entrega senhas nem cookies válidos. As falhas de login ficam no banco (e não em
+Cada sessão é um refresh token (o JWT de acesso fica em `tokens.py`). Senhas ficam só como
+hash argon2 e sessões só como hash SHA-256 do refresh token: um vazamento do banco não
+entrega senhas nem tokens válidos. As falhas de login ficam no banco (e não em
 memória) para o bloqueio valer mesmo depois de reiniciar a API.
 """
 
@@ -50,6 +51,10 @@ _DUMMY_HASH = _hasher.hash("senha-inexistente")
 
 class EmailTakenError(Exception):
     """Já existe um usuário com esse e-mail."""
+
+
+class LastAdminError(Exception):
+    """A operação deixaria o sistema sem nenhum administrador."""
 
 
 class TooManyAttemptsError(Exception):
@@ -122,6 +127,121 @@ def create_user(name: str, email: str, password: str) -> User:
     except sqlite3.IntegrityError as exc:
         raise EmailTakenError(email) from exc
     return _to_user(row)
+
+
+# --- Gestão de usuários (administradores) -------------------------------------------
+
+
+def list_users() -> list[User]:
+    """Todos os usuários, por nome."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, email, is_admin FROM users ORDER BY name COLLATE NOCASE, email"
+        ).fetchall()
+    return [_to_user(r) for r in rows]
+
+
+def get_user(user_id: str) -> User | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, name, email, is_admin FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    return _to_user(row) if row else None
+
+
+def add_user(name: str, email: str, password: str, is_admin: bool) -> User:
+    """Cadastra um usuário com o papel escolhido por um administrador.
+
+    Raises:
+        EmailTakenError: Se o e-mail já estiver cadastrado.
+    """
+    user_id = str(uuid.uuid4())
+    email = normalize_email(email)
+    try:
+        with _connect() as conn:
+            conn.execute(
+                "INSERT INTO users (id, name, email, password_hash, is_admin, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, name, email, _hasher.hash(password), int(is_admin), _now().isoformat()),
+            )
+    except sqlite3.IntegrityError as exc:
+        raise EmailTakenError(email) from exc
+    return User(id=user_id, name=name, email=email, is_admin=is_admin)
+
+
+def _other_admins(conn: sqlite3.Connection, user_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND id != ?", (user_id,)
+    ).fetchone()
+    return int(row[0])
+
+
+def update_user(
+    user_id: str,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+    is_admin: bool | None = None,
+    keep_session: str | None = None,
+) -> User | None:
+    """Altera os campos informados (None = não muda).
+
+    Trocar a senha encerra as sessões do usuário, menos a `keep_session` (o `session_id`
+    de quem está trocando a própria senha), para quem tinha a senha antiga sair.
+
+    Returns:
+        O usuário atualizado, ou None se o id não existir.
+
+    Raises:
+        EmailTakenError: Se o novo e-mail já for de outra conta.
+        LastAdminError: Se tirar o admin do único administrador.
+    """
+    fields: dict[str, object] = {}
+    if name is not None:
+        fields["name"] = name
+    if email is not None:
+        fields["email"] = normalize_email(email)
+    if password is not None:
+        fields["password_hash"] = _hasher.hash(password)
+    if is_admin is not None:
+        fields["is_admin"] = int(is_admin)
+    try:
+        with _connect() as conn:
+            exists = conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not exists:
+                return None
+            if is_admin is False and _other_admins(conn, user_id) == 0:
+                raise LastAdminError(user_id)
+            if fields:
+                sets = ", ".join(f"{column} = ?" for column in fields)
+                conn.execute(f"UPDATE users SET {sets} WHERE id = ?", (*fields.values(), user_id))
+            if password is not None:
+                conn.execute(
+                    "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+                    (user_id, keep_session or ""),
+                )
+    except sqlite3.IntegrityError as exc:
+        raise EmailTakenError(str(fields.get("email"))) from exc
+    return get_user(user_id)
+
+
+def delete_user(user_id: str) -> bool:
+    """Apaga o usuário e as sessões dele (ON DELETE CASCADE).
+
+    Memórias, conversas e checkpoints ficam em outros bancos: quem chama apaga.
+
+    Raises:
+        LastAdminError: Se for o único administrador.
+    """
+    with _connect() as conn:
+        row = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            return False
+        if row[0] and _other_admins(conn, user_id) == 0:
+            raise LastAdminError(user_id)
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return True
 
 
 def authenticate(email: str, password: str) -> User | None:
@@ -198,10 +318,15 @@ def clear_login_failures(email: str) -> None:
         )
 
 
-def create_session(user_id: str) -> str:
-    """Abre uma sessão e devolve o token (só ele vai ao cookie; o banco guarda o hash)."""
+def create_session(user_id: str) -> tuple[str, str]:
+    """Abre uma sessão e devolve `(refresh_token, session_id)`.
+
+    O refresh token vai só para o cookie; o banco guarda o hash dele, que é também o
+    `session_id` levado dentro do JWT de acesso (`sid`).
+    """
     settings = get_settings()
     token = secrets.token_urlsafe(32)
+    session_id = _hash_token(token)
     now = _now()
     expires = now + timedelta(hours=settings.session_ttl_hours)
     with _connect() as conn:
@@ -210,23 +335,42 @@ def create_session(user_id: str) -> str:
         conn.execute(
             "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) "
             "VALUES (?, ?, ?, ?)",
-            (_hash_token(token), user_id, now.isoformat(), expires.isoformat()),
+            (session_id, user_id, now.isoformat(), expires.isoformat()),
         )
-    return token
+    return token, session_id
 
 
-def get_user_by_token(token: str) -> User | None:
-    """Usuário dono de uma sessão válida (inexistente ou vencida = None)."""
+def _session_user(session_id: str, user_id: str | None = None) -> User | None:
+    query = (
+        "SELECT u.id, u.name, u.email, u.is_admin FROM sessions s "
+        "JOIN users u ON u.id = s.user_id "
+        "WHERE s.token_hash = ? AND s.expires_at > ?"
+    )
+    params: tuple[str, ...] = (session_id, _now().isoformat())
+    if user_id is not None:
+        query += " AND u.id = ?"
+        params += (user_id,)
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT u.id, u.name, u.email, u.is_admin FROM sessions s "
-            "JOIN users u ON u.id = s.user_id "
-            "WHERE s.token_hash = ? AND s.expires_at > ?",
-            (_hash_token(token), _now().isoformat()),
-        ).fetchone()
+        row = conn.execute(query, params).fetchone()
     return _to_user(row) if row else None
 
 
+def get_user_by_refresh_token(token: str) -> tuple[User, str] | None:
+    """Usuário e `session_id` de um refresh token válido (inexistente ou vencido = None)."""
+    session_id = _hash_token(token)
+    user = _session_user(session_id)
+    return (user, session_id) if user else None
+
+
+def get_session_user(user_id: str, session_id: str) -> User | None:
+    """Confere um JWT de acesso no banco: a sessão existe, não venceu e é desse usuário.
+
+    O papel (`is_admin`) vem do banco, não do token, então rebaixar alguém vale na hora.
+    """
+    return _session_user(session_id, user_id)
+
+
 def delete_session(token: str) -> None:
+    """Encerra a sessão do refresh token (logout)."""
     with _connect() as conn:
         conn.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash_token(token),))

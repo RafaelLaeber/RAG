@@ -1,5 +1,6 @@
 import { readEvents } from './sse'
 import type {
+  AuthResponse,
   ChatEvent,
   ConversationDetail,
   ConversationSummary,
@@ -9,6 +10,8 @@ import type {
   UploadCheck,
   UploadResult,
   User,
+  UserCreate,
+  UserUpdate,
 } from './types'
 
 export class ApiError extends Error {
@@ -54,16 +57,45 @@ async function toError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message)
 }
 
-async function send(path: string, init: RequestInit = {}, authRoute = false): Promise<Response> {
-  let res: Response
+async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   try {
-    res = await fetch(path, { credentials: 'same-origin', ...init })
+    return await fetch(path, { credentials: 'same-origin', ...init })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err
     throw new ApiError(0, 'Sem conexão com o servidor. Verifique sua rede e tente de novo.')
   }
+}
+
+// Rotas em que um 401 não é "JWT vencido": não adianta renovar e tentar de novo.
+const NO_REFRESH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout'])
+
+let refreshing: Promise<boolean> | null = null
+
+/**
+ * Pede um JWT novo com o refresh token (cookie `vega_refresh`). Várias requisições que
+ * recebem 401 ao mesmo tempo esperam a mesma renovação, em vez de cada uma pedir a sua.
+ */
+function refreshAccess(): Promise<boolean> {
+  refreshing ??= rawFetch('/api/auth/refresh', { method: 'POST' })
+    .then((r) => r.ok)
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null
+    })
+  return refreshing
+}
+
+/**
+ * fetch com a sessão: num 401, renova o JWT uma vez e repete a requisição. Se a renovação
+ * falhar, a sessão acabou de verdade e o handler manda para o login.
+ * `authRoute`: o 401 é esperado (senha errada, sem sessão ao abrir a página) e não chama o handler.
+ */
+async function send(path: string, init: RequestInit = {}, authRoute = false): Promise<Response> {
+  let res = await rawFetch(path, init)
+  if (res.status === 401 && !NO_REFRESH.has(path) && (await refreshAccess())) {
+    res = await rawFetch(path, init)
+  }
   if (!res.ok) {
-    // 401 em rotas de login/registro/me é "senha errada" ou "sem sessão", não sessão expirada.
     if (res.status === 401 && !authRoute) onUnauthorized?.()
     throw await toError(res)
   }
@@ -94,10 +126,11 @@ function filesForm(files: File[]): FormData {
 }
 
 export const api = {
-  register: (name: string, email: string, password: string) =>
-    post<User>('/api/auth/register', { name, email, password }, true),
-  login: (email: string, password: string) =>
-    post<User>('/api/auth/login', { email, password }, true),
+  // O JWT vem no corpo também, mas o navegador usa só os cookies HttpOnly: nada fica no JS.
+  register: async (name: string, email: string, password: string) =>
+    (await post<AuthResponse>('/api/auth/register', { name, email, password }, true)).user,
+  login: async (email: string, password: string) =>
+    (await post<AuthResponse>('/api/auth/login', { email, password }, true)).user,
   logout: async () => {
     await send('/api/auth/logout', { method: 'POST' }, true)
   },
@@ -111,12 +144,28 @@ export const api = {
     await send(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
 
+  listUsers: () => json<User[]>('/api/users'),
+  createUser: (body: UserCreate) => post<User>('/api/users', body),
+  updateUser: (id: string, body: UserUpdate) =>
+    json<User>(`/api/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteUser: async (id: string) => {
+    await send(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
   listDocuments: () => json<DataFile[]>('/api/documents'),
   checkDocuments: (files: File[]) =>
     json<UploadCheck[]>('/api/documents/check', { method: 'POST', body: filesForm(files) }),
   uploadDocuments: (files: File[]) =>
     json<UploadResult>('/api/documents', { method: 'POST', body: filesForm(files) }),
   ingest: () => post<IngestionResult>('/api/documents/ingest'),
+  deleteDocument: async (name: string) => {
+    await send(`/api/documents/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  },
+  clearDocuments: () => json<{ removed: number }>('/api/documents', { method: 'DELETE' }),
 }
 
 /** Abre o stream SSE do chat. Lança ApiError se a resposta inicial falhar (401, 404, 422...). */

@@ -170,6 +170,23 @@ def delete_conversation(user_id: str, conversation_id: str) -> bool:
     return cursor.rowcount > 0
 
 
+def delete_user_conversations(user_id: str) -> list[str]:
+    """Apaga todas as conversas do usuário (usado ao excluir a conta).
+
+    Returns:
+        Os ids apagados, para quem chama apagar também os checkpoints (thread_id).
+    """
+    with _connect() as conn:
+        ids = [
+            str(r[0])
+            for r in conn.execute(
+                "SELECT id FROM conversations WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        ]
+        conn.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+    return ids
+
+
 def to_agent_messages(messages: list[StoredMessage]) -> list[AnyMessage]:
     """Converte o histórico salvo em mensagens do agente (só o texto, sem chamadas de tool).
 

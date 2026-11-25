@@ -60,8 +60,14 @@ class Settings(BaseSettings):
 
     # Usuários e sessões (SQLite local). O cookie só deve ser Secure atrás de HTTPS.
     users_db_path: Path = Path("storage/users.sqlite")
-    session_ttl_hours: int = Field(default=168, gt=0)
+    session_ttl_hours: int = Field(default=168, gt=0)  # validade do refresh token (sessão)
     session_cookie_secure: bool = False
+
+    # JWT de acesso (HS256). Sem JWT_SECRET, uma chave aleatória é gerada e guardada em
+    # jwt_secret_path na primeira execução (todas as instâncias precisam da mesma chave)
+    jwt_secret: SecretStr | None = None
+    jwt_secret_path: Path = Path("storage/jwt_secret.key")
+    access_token_minutes: int = Field(default=15, gt=0)
 
     # Limite de tentativas de login: falhas dentro da janela bloqueiam novas tentativas
     # até a falha mais antiga sair dela. Por e-mail (força bruta numa conta) e por IP

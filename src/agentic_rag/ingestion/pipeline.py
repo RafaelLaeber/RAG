@@ -14,6 +14,7 @@ from agentic_rag.guardrails.detection import find_injection_signals
 from agentic_rag.ingestion.loaders import load_documents
 from agentic_rag.ingestion.splitter import split_documents
 from agentic_rag.ingestion.tracing import summarize_documents
+from agentic_rag.ingestion.uploads import safe_filename
 from agentic_rag.retrieval.vectorstore import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,47 @@ def run_ingestion() -> IngestionResult:
         result.deleted,
     )
     return result
+
+
+def clear_knowledge_base() -> int:
+    """Apaga todos os chunks da collection e todos os arquivos de `data_dir`.
+
+    O índice é limpo primeiro: se o Astra falhar, nada foi apagado. Se a remoção de um
+    arquivo falhar depois, o erro sobe e a pasta pode ficar com arquivos já sem índice
+    (rodar a ingestão resolve).
+
+    Returns:
+        Quantos arquivos foram removidos de `data_dir`.
+    """
+    settings = get_settings()
+    vector_store = get_vector_store()
+    ids = list(_existing_ids(vector_store))
+    if ids:
+        vector_store.delete(ids=ids)
+
+    removed = 0
+    if settings.data_dir.exists():
+        for path in settings.data_dir.iterdir():
+            if path.is_file() and not path.name.startswith("."):
+                path.unlink()
+                removed += 1
+    logger.info("Base limpa: %d chunk(s) e %d arquivo(s) removido(s)", len(ids), removed)
+    return removed
+
+
+def delete_document(name: str) -> bool:
+    """Apaga um arquivo de `data_dir` e os chunks dele no Astra (índice primeiro).
+
+    Returns:
+        `False` se não existir um arquivo com esse nome em `data_dir`.
+    """
+    path = get_settings().data_dir / safe_filename(name)
+    if not path.is_file() or path.name.startswith("."):
+        return False
+    get_vector_store().delete_by_metadata_filter({"source": path.name})
+    path.unlink()
+    logger.info("Documento removido: %s", path.name)
+    return True
 
 
 if __name__ == "__main__":
